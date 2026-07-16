@@ -1,0 +1,18 @@
+{
+  "name": "get_inbound_count",
+  "description": "Get the count of inbound shipments/deliveries at Fresh Factory for a given date and status. Use this when the user asks how many inbound shipments arrived, are pending, or match some status on a specific date.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "date": {
+        "type": "string",
+        "description": "The date to query, in YYYY-MM-DD format."
+      },
+      "status": {
+        "type": "string",
+        "description": "Inbound status to filter by (e.g. pending, received, completed). Exact valid values depend on the WMS and may need adjusting once connected to the real system."
+      }
+    },
+    "required": ["date", "status"]
+  }
+}

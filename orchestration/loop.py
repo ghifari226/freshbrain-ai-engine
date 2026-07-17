@@ -52,6 +52,31 @@ client = anthropic.Anthropic()
 ##############################################################################
 STUB_CLAUDE_API = os.getenv("STUB_CLAUDE_API", "true").lower() != "false"
 
+# Deterministic string-to-string answers for a few known questions that
+# don't need a tool round trip — same idea as the tool stub above (fake
+# data, real client-facing behavior), just for questions where the "tool"
+# would be a single fixed fact. Matched on exact question text, trailing
+# "?" optional, since real users often skip it.
+_CANNED_ANSWERS = {
+    "berapa total warehouse partnership saat ini": "Saat ini terdapat total 32 warehouse partnership.",
+    "berapa revenue client greenfields bulan lalu": "Revenue client Greenfields bulan lalu tercatat sebesar Rp 3.449.264.446,66.",
+    "berapa revenue client greenfields 3 bulan terakhir": "Revenue client Greenfields 3 bulan terakhir tercatat sebesar Rp 12.207.385.195,91.",
+}
+
+
+def _normalize_question(text: str) -> str:
+    return text.strip().rstrip("?").strip().lower()
+
+
+def _last_user_text(messages: list[dict]) -> str:
+    """Finds the most recent plain-text user turn (the real question), as
+    opposed to a tool_result turn (also role "user", but content is a list,
+    not a string)."""
+    for msg in reversed(messages):
+        if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+            return msg["content"]
+    return ""
+
 
 class _StubContentBlock:
     def __init__(self, data: dict):
@@ -89,6 +114,21 @@ def _stub_messages_create(*, model, max_tokens, system, tools, messages):
         )
 
     if tool_result is None:
+        text = _last_user_text(messages)
+        canned = _CANNED_ANSWERS.get(_normalize_question(text))
+        if canned is not None:
+            return _StubMessage(
+                content=[{"type": "text", "text": canned}],
+                stop_reason="end_turn",
+            )
+
+        lowered = text.lower()
+        if not any(kw in lowered for kw in ("pengiriman", "inbound", "shipment")):
+            return _StubMessage(
+                content=[{"type": "text", "text": "Kami belum punya jawaban untuk pertanyaan itu."}],
+                stop_reason="end_turn",
+            )
+
         today = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d")
         return _StubMessage(
             content=[

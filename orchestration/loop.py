@@ -1,12 +1,13 @@
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import anthropic
 
+from db.warehouse import get_partner_revenue
 from tools.functions.inbound import get_inbound_count
 
 logger = logging.getLogger(__name__)
@@ -59,13 +60,26 @@ STUB_CLAUDE_API = os.getenv("STUB_CLAUDE_API", "true").lower() != "false"
 # "?" optional, since real users often skip it.
 _CANNED_ANSWERS = {
     "berapa total warehouse partnership saat ini": "Saat ini terdapat total 32 warehouse partnership.",
-    "berapa revenue client greenfields bulan lalu": "Revenue client Greenfields bulan lalu tercatat sebesar Rp 3.449.264.446,66.",
-    "berapa revenue client greenfields 3 bulan terakhir": "Revenue client Greenfields 3 bulan terakhir tercatat sebesar Rp 12.207.385.195,91.",
+}
+
+# Odoo stores "Greenfields" as two separate res.partner records.
+GREENFIELDS_PARTNER_IDS = (1334, 1336)
+
+# Same exact-match idea as _CANNED_ANSWERS, but backed by a real query
+# against the warehouse's fact_revenue table instead of a fixed string.
+_REVENUE_WINDOWS = {
+    "berapa revenue client greenfields bulan lalu": (date(2026, 6, 1), date(2026, 6, 30)),
+    "berapa revenue client greenfields 3 bulan terakhir": (date(2026, 4, 1), date(2026, 6, 30)),
 }
 
 
 def _normalize_question(text: str) -> str:
     return text.strip().rstrip("?").strip().lower()
+
+
+def _format_rupiah(amount) -> str:
+    integer_part, _, decimal_part = f"{amount:,.2f}".partition(".")
+    return f"Rp {integer_part.replace(',', '.')},{decimal_part}"
 
 
 def _last_user_text(messages: list[dict]) -> str:
@@ -97,7 +111,7 @@ class _StubMessage:
         self.stop_reason = stop_reason
 
 
-def _stub_messages_create(*, model, max_tokens, system, tools, messages):
+async def _stub_messages_create(*, model, max_tokens, system, tools, messages):
     """Fake substitute for client.messages.create() — see STUB block above."""
     logger.warning(
         "STUB Claude API call in orchestration/loop.py — returning a FAKE "
@@ -115,10 +129,20 @@ def _stub_messages_create(*, model, max_tokens, system, tools, messages):
 
     if tool_result is None:
         text = _last_user_text(messages)
-        canned = _CANNED_ANSWERS.get(_normalize_question(text))
+        normalized = _normalize_question(text)
+
+        canned = _CANNED_ANSWERS.get(normalized)
         if canned is not None:
             return _StubMessage(
                 content=[{"type": "text", "text": canned}],
+                stop_reason="end_turn",
+            )
+
+        revenue_window = _REVENUE_WINDOWS.get(normalized)
+        if revenue_window is not None:
+            total = await get_partner_revenue(GREENFIELDS_PARTNER_IDS, *revenue_window)
+            return _StubMessage(
+                content=[{"type": "text", "text": _format_rupiah(total)}],
                 stop_reason="end_turn",
             )
 
@@ -199,7 +223,7 @@ async def run_chat_loop(messages: list[dict]) -> list[dict]:
 
     for _ in range(MAX_TOOL_ITERATIONS):
         if STUB_CLAUDE_API:
-            response = _stub_messages_create(
+            response = await _stub_messages_create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
                 system=system_prompt,

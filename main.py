@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -42,6 +42,14 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
+    # Per auth-contract.md's "every subsequent request" shape. role is
+    # stored as a timestamped snapshot on feedback/tool_call_logs rows (not
+    # implemented yet) but never treated as current truth; allowed_scopes is
+    # what actually gates which tools this request can see — see
+    # orchestration/loop.py's TOOL_SCOPES/scope_grants().
+    user_id: str | None = None
+    role: str | None = None
+    allowed_scopes: list[str] | None = None
 
 
 class ChatResponse(BaseModel):
@@ -50,7 +58,14 @@ class ChatResponse(BaseModel):
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest) -> ChatResponse:
+async def chat(req: ChatRequest, authorization: str | None = Header(default=None)) -> ChatResponse:
+    # Accepted but not verified — chat-gateway doesn't exist yet, so there's
+    # no real signing key to check this against (the mock frontend sends the
+    # literal string "mock-jwt-token"). Per auth-contract.md, ai-engine only
+    # ever verifies a signature here, never issues or validates credentials
+    # itself — wire real verification in once chat-gateway is signing tokens.
+    del authorization
+
     if req.conversation_id:
         try:
             conversation_id = UUID(req.conversation_id)
@@ -66,7 +81,10 @@ async def chat(req: ChatRequest) -> ChatResponse:
     await repository.add_message(conversation_id, "user", req.message)
     messages = history + [{"role": "user", "content": req.message}]
 
-    new_messages = await run_chat_loop(messages)
+    # Fail closed: an omitted allowed_scopes means no tools are visible,
+    # not unrestricted access. Real callers (chat-interface) always send a
+    # real (possibly empty) list once logged in.
+    new_messages = await run_chat_loop(messages, allowed_scopes=req.allowed_scopes or [])
 
     for msg in new_messages:
         await repository.add_message(conversation_id, msg["role"], msg["content"])

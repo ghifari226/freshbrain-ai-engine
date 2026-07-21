@@ -21,12 +21,45 @@ TOOLS_SCHEMA_DIR = Path(__file__).resolve().parent.parent / "tools" / "schemas"
 with open(TOOLS_SCHEMA_DIR / "inbound.json") as f:
     INBOUND_TOOL_SCHEMA = json.load(f)
 
-TOOLS = [INBOUND_TOOL_SCHEMA]
+# Every tool schema that exists, unfiltered — see tools_for_scopes() for the
+# per-request view actually sent to Claude.
+ALL_TOOLS = [INBOUND_TOOL_SCHEMA]
 
 # Maps tool name -> async Python function that implements it.
 TOOL_FUNCTIONS = {
     "get_inbound_count": get_inbound_count,
 }
+
+# Maps tool name -> the scope tag required to see/use it, per
+# freshbrain-agreement/scope-catalog.md. Kept separate from the Claude-
+# facing schema files (tools/schemas/*.json) since scope is authorization
+# metadata, not part of what the schema shows the model.
+TOOL_SCOPES = {
+    "get_inbound_count": "wms.inbound",
+}
+
+
+def scope_grants(allowed_scopes: list[str], required_scope: str) -> bool:
+    """Implements scope-catalog.md's matching rules: "*" matches every
+    scope now and in the future; a system-level tag (e.g. "wms") matches
+    itself and any "wms.*" sub-scope; a sub-scope tag (e.g. "wms.inbound")
+    matches only itself, exactly. A broader grant doesn't imply the
+    narrower sub-scopes were individually requested, and a narrower grant
+    does NOT imply the parent system-level tag is also granted."""
+    for granted in allowed_scopes:
+        if granted == "*" or granted == required_scope:
+            return True
+        if required_scope.startswith(f"{granted}."):
+            return True
+    return False
+
+
+def tools_for_scopes(allowed_scopes: list[str]) -> list[dict]:
+    """The subset of ALL_TOOLS this caller's allowed_scopes actually grants
+    — this, not ALL_TOOLS, is what gets sent to Claude, so a scope-less
+    caller never even sees a tool exists, let alone gets to invoke it."""
+    return [tool for tool in ALL_TOOLS if scope_grants(allowed_scopes, TOOL_SCOPES[tool["name"]])]
+
 
 client = anthropic.Anthropic()
 
@@ -111,8 +144,15 @@ class _StubMessage:
         self.stop_reason = stop_reason
 
 
-async def _stub_messages_create(*, model, max_tokens, system, tools, messages):
-    """Fake substitute for client.messages.create() — see STUB block above."""
+async def _stub_messages_create(*, model, max_tokens, system, tools, messages, allowed_scopes):
+    """Fake substitute for client.messages.create() — see STUB block above.
+
+    Unlike the real API, this doesn't naturally "just not know about" a tool
+    it wasn't shown — it has to be told explicitly (via `tools`/
+    `allowed_scopes`) which shortcuts are actually reachable, so the stub
+    behaves the way real gating would: a scope-less caller gets the same
+    "no answer" response a real Claude call would give when it was never
+    shown the relevant tool, not a fake successful answer anyway."""
     logger.warning(
         "STUB Claude API call in orchestration/loop.py — returning a FAKE "
         "Claude response, not calling the real API. See STUB block above "
@@ -140,14 +180,25 @@ async def _stub_messages_create(*, model, max_tokens, system, tools, messages):
 
         revenue_window = _REVENUE_WINDOWS.get(normalized)
         if revenue_window is not None:
-            total = await get_partner_revenue(GREENFIELDS_PARTNER_IDS, *revenue_window)
+            # This shortcut bypasses the tool-use loop entirely (it never
+            # goes through tools_for_scopes/execute_tool), so it needs its own scope
+            # check — revenue data is gated by "odoo" per scope-catalog.md.
+            if scope_grants(allowed_scopes, "odoo"):
+                total = await get_partner_revenue(GREENFIELDS_PARTNER_IDS, *revenue_window)
+                return _StubMessage(
+                    content=[{"type": "text", "text": _format_rupiah(total)}],
+                    stop_reason="end_turn",
+                )
             return _StubMessage(
-                content=[{"type": "text", "text": _format_rupiah(total)}],
+                content=[{"type": "text", "text": "Kami belum punya jawaban untuk pertanyaan itu."}],
                 stop_reason="end_turn",
             )
 
         lowered = text.lower()
-        if not any(kw in lowered for kw in ("pengiriman", "inbound", "shipment")):
+        inbound_tool_visible = any(tool["name"] == "get_inbound_count" for tool in tools)
+        if not inbound_tool_visible or not any(
+            kw in lowered for kw in ("pengiriman", "inbound", "shipment")
+        ):
             return _StubMessage(
                 content=[{"type": "text", "text": "Kami belum punya jawaban untuk pertanyaan itu."}],
                 stop_reason="end_turn",
@@ -199,19 +250,26 @@ def build_system_prompt() -> str:
     )
 
 
-async def execute_tool(name: str, tool_input: dict) -> dict:
+async def execute_tool(name: str, tool_input: dict, allowed_scopes: list[str]) -> dict:
+    # Defense in depth, not the primary gate — Claude (real or stubbed)
+    # should never request a tool outside tools_for_scopes(allowed_scopes)
+    # in the first place, since it's never shown one. This catches it
+    # anyway rather than trusting that invariant blindly.
     func = TOOL_FUNCTIONS.get(name)
     if func is None:
         return {"error": f"Unknown tool: {name}"}
+    required_scope = TOOL_SCOPES.get(name)
+    if required_scope is None or not scope_grants(allowed_scopes, required_scope):
+        return {"error": f"Not authorized to use tool: {name}"}
     return await func(**tool_input)
 
 
-async def run_chat_loop(messages: list[dict]) -> list[dict]:
+async def run_chat_loop(messages: list[dict], allowed_scopes: list[str]) -> list[dict]:
     """
     Runs the Claude tool-use loop given prior conversation history plus the
     new user turn (Claude message-param format). Sends the system prompt +
-    the one available tool, executes any tool_use requests, and resends
-    results until Claude produces a final text answer.
+    only the tools allowed_scopes grants, executes any tool_use requests,
+    and resends results until Claude produces a final text answer.
 
     Returns the list of NEW message dicts produced this turn (to be
     persisted) in order — the final entry is always the assistant's
@@ -220,6 +278,7 @@ async def run_chat_loop(messages: list[dict]) -> list[dict]:
     system_prompt = build_system_prompt()
     working_messages = list(messages)
     new_messages: list[dict] = []
+    tools = tools_for_scopes(allowed_scopes)
 
     for _ in range(MAX_TOOL_ITERATIONS):
         if STUB_CLAUDE_API:
@@ -227,15 +286,16 @@ async def run_chat_loop(messages: list[dict]) -> list[dict]:
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
                 system=system_prompt,
-                tools=TOOLS,
+                tools=tools,
                 messages=working_messages,
+                allowed_scopes=allowed_scopes,
             )
         else:
             response = client.messages.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
                 system=system_prompt,
-                tools=TOOLS,
+                tools=tools,
                 messages=working_messages,
             )
 
@@ -250,7 +310,7 @@ async def run_chat_loop(messages: list[dict]) -> list[dict]:
         tool_results = []
         for block in response.content:
             if block.type == "tool_use":
-                result = await execute_tool(block.name, block.input)
+                result = await execute_tool(block.name, block.input, allowed_scopes)
                 tool_results.append(
                     {
                         "type": "tool_result",

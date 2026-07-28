@@ -34,11 +34,36 @@ async def get_messages(conversation_id: UUID) -> list[dict]:
     return [{"role": row["role"], "content": json.loads(row["content"])} for row in rows]
 
 
-async def add_message(conversation_id: UUID, role: str, content) -> None:
+async def add_message(conversation_id: UUID, role: str, content) -> UUID:
     pool = get_pool()
-    await pool.execute(
-        "INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3::jsonb)",
+    row = await pool.fetchrow(
+        "INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3::jsonb) RETURNING id",
         conversation_id,
         role,
         json.dumps(content),
     )
+    return row["id"]
+
+
+async def add_feedback(
+    message_id: UUID,
+    conversation_id: UUID,
+    user_id: UUID,
+    role: str,
+    rating: str,
+    reason: str | None,
+    comment: str | None,
+) -> UUID:
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "INSERT INTO feedback (message_id, conversation_id, user_id, role, rating, reason, comment) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+        message_id,
+        conversation_id,
+        user_id,
+        role,
+        rating,
+        reason,
+        comment,
+    )
+    return row["id"]

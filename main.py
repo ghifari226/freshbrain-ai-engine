@@ -10,6 +10,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from auth import verify_mock_token
 from db import repository
 from db.connection import close_pool, init_pool
 from orchestration.loop import extract_final_text, run_chat_loop
@@ -55,16 +56,29 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     conversation_id: str
+    message_id: str
+
+
+class FeedbackRequest(BaseModel):
+    message_id: str
+    conversation_id: str
+    user_id: str
+    role: str
+    rating: str
+    reason: str | None = None
+    comment: str | None = None
+
+
+class FeedbackResponse(BaseModel):
+    id: str
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, authorization: str | None = Header(default=None)) -> ChatResponse:
-    # Accepted but not verified — chat-gateway doesn't exist yet, so there's
-    # no real signing key to check this against (the mock frontend sends the
-    # literal string "mock-jwt-token"). Per auth-contract.md, ai-engine only
-    # ever verifies a signature here, never issues or validates credentials
-    # itself — wire real verification in once chat-gateway is signing tokens.
-    del authorization
+    # verify_mock_token is a temporary stand-in for chat-gateway's real
+    # signature verification (see auth.py) — delete once chat-gateway exists
+    # and signs real tokens.
+    verify_mock_token(authorization, req.user_id)
 
     if req.conversation_id:
         try:
@@ -86,11 +100,39 @@ async def chat(req: ChatRequest, authorization: str | None = Header(default=None
     # real (possibly empty) list once logged in.
     new_messages = await run_chat_loop(messages, allowed_scopes=req.allowed_scopes or [])
 
+    final_message_id = None
     for msg in new_messages:
-        await repository.add_message(conversation_id, msg["role"], msg["content"])
+        final_message_id = await repository.add_message(conversation_id, msg["role"], msg["content"])
 
     await repository.touch_conversation(conversation_id)
 
     final_text = extract_final_text(new_messages[-1]["content"])
 
-    return ChatResponse(answer=final_text, conversation_id=str(conversation_id))
+    return ChatResponse(
+        answer=final_text,
+        conversation_id=str(conversation_id),
+        message_id=str(final_message_id),
+    )
+
+
+@app.post("/feedback", response_model=FeedbackResponse)
+async def feedback(
+    req: FeedbackRequest, authorization: str | None = Header(default=None)
+) -> FeedbackResponse:
+    verify_mock_token(authorization, req.user_id)
+
+    if req.rating not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="Invalid rating")
+    if req.rating == "down" and not req.reason:
+        raise HTTPException(status_code=400, detail="reason is required for a down rating")
+
+    feedback_id = await repository.add_feedback(
+        UUID(req.message_id),
+        UUID(req.conversation_id),
+        UUID(req.user_id),
+        req.role,
+        req.rating,
+        req.reason,
+        req.comment,
+    )
+    return FeedbackResponse(id=str(feedback_id))

@@ -2,9 +2,19 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS conversations (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL,
+    -- Nullable: title generation (POST /chat/title) is decoupled from
+    -- conversation creation (POST /chat) and chat-interface doesn't
+    -- currently PATCH the result back — see auth-contract.md's
+    -- "Pertanyaan Terbuka" entry on this. GET /conversations maps NULL to
+    -- "" so the frontend's non-optional Conversation.title still holds.
+    title text,
     created_at timestamptz NOT NULL DEFAULT now(),
     last_active_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS idx_conversations_user_id
+    ON conversations (user_id, last_active_at DESC);
 
 -- content stores Claude's native message content for that turn (either a
 -- plain string, or a list of text/tool_use/tool_result blocks) so history

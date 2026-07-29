@@ -1,0 +1,14 @@
+{
+  "name": "rename_conversation",
+  "description": "Rename/retitle the current conversation. Only call this when the user explicitly asks to rename, retitle, or change the name of this conversation/thread/chat (e.g. \"rename this to X\", \"ubah judul jadi X\") — never as a side effect of an ordinary question.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "The new title, exactly as the user wants it (no surrounding quotes)."
+      }
+    },
+    "required": ["title"]
+  }
+}

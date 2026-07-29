@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -20,6 +21,9 @@ TOOLS_SCHEMA_DIR = Path(__file__).resolve().parent.parent / "tools" / "schemas"
 
 with open(TOOLS_SCHEMA_DIR / "inbound.json") as f:
     INBOUND_TOOL_SCHEMA = json.load(f)
+
+with open(TOOLS_SCHEMA_DIR / "rename_conversation.json") as f:
+    RENAME_TOOL_SCHEMA = json.load(f)
 
 # Every tool schema that exists, unfiltered — see tools_for_scopes() for the
 # per-request view actually sent to Claude.
@@ -144,6 +148,18 @@ class _StubMessage:
         self.stop_reason = stop_reason
 
 
+_RENAME_INTENT_PATTERN = re.compile(
+    r'(?:rename (?:this (?:thread|conversation|chat) )?to|'
+    r'(?:ganti|ubah) judul(?:nya)? (?:jadi|ke))\s+["\']?([^"\'.!]+?)["\']?[.!]*$',
+    re.IGNORECASE,
+)
+
+
+def _match_rename_intent(text: str) -> str | None:
+    match = _RENAME_INTENT_PATTERN.search(text.strip())
+    return match.group(1).strip() if match else None
+
+
 async def _stub_messages_create(*, model, max_tokens, system, tools, messages, allowed_scopes):
     """Fake substitute for client.messages.create() — see STUB block above.
 
@@ -170,6 +186,20 @@ async def _stub_messages_create(*, model, max_tokens, system, tools, messages, a
     if tool_result is None:
         text = _last_user_text(messages)
         normalized = _normalize_question(text)
+
+        rename_tool_visible = any(tool["name"] == "rename_conversation" for tool in tools)
+        if rename_tool_visible:
+            new_title = _match_rename_intent(text)
+            if new_title:
+                return _StubMessage(
+                    content=[{
+                        "type": "tool_use",
+                        "id": "toolu_stub_rename_0000000000",
+                        "name": "rename_conversation",
+                        "input": {"title": new_title},
+                    }],
+                    stop_reason="tool_use",
+                )
 
         canned = _CANNED_ANSWERS.get(normalized)
         if canned is not None:
@@ -223,6 +253,15 @@ async def _stub_messages_create(*, model, max_tokens, system, tools, messages, a
     except (KeyError, TypeError, json.JSONDecodeError):
         result = {}
 
+    if result.get("status") == "renamed":
+        return _StubMessage(
+            content=[{
+                "type": "text",
+                "text": f'Baik, saya ubah judul percakapan ini jadi "{result.get("title", "")}".',
+            }],
+            stop_reason="end_turn",
+        )
+
     return _StubMessage(
         content=[{
             "type": "text",
@@ -264,21 +303,29 @@ async def execute_tool(name: str, tool_input: dict, allowed_scopes: list[str]) -
     return await func(**tool_input)
 
 
-async def run_chat_loop(messages: list[dict], allowed_scopes: list[str]) -> list[dict]:
+async def run_chat_loop(
+    messages: list[dict], allowed_scopes: list[str], allow_rename: bool = False
+) -> tuple[list[dict], str | None]:
     """
     Runs the Claude tool-use loop given prior conversation history plus the
     new user turn (Claude message-param format). Sends the system prompt +
     only the tools allowed_scopes grants, executes any tool_use requests,
     and resends results until Claude produces a final text answer.
 
-    Returns the list of NEW message dicts produced this turn (to be
-    persisted) in order — the final entry is always the assistant's
-    end_turn response.
+    `allow_rename` offers the (unscoped — not a data-access tool)
+    rename_conversation tool. Only meaningful mid-conversation — per
+    auth-contract.md, a brand-new conversation's title comes from the
+    separate POST /chat/title call instead, never from this path.
+
+    Returns (new NEW message dicts produced this turn, in order — the final
+    entry is always the assistant's end_turn response; the new title, if
+    the model called rename_conversation this turn, else None).
     """
     system_prompt = build_system_prompt()
     working_messages = list(messages)
     new_messages: list[dict] = []
-    tools = tools_for_scopes(allowed_scopes)
+    renamed_title: str | None = None
+    tools = tools_for_scopes(allowed_scopes) + ([RENAME_TOOL_SCHEMA] if allow_rename else [])
 
     for _ in range(MAX_TOOL_ITERATIONS):
         if STUB_CLAUDE_API:
@@ -305,26 +352,65 @@ async def run_chat_loop(messages: list[dict], allowed_scopes: list[str]) -> list
         new_messages.append(assistant_message)
 
         if response.stop_reason != "tool_use":
-            return new_messages
+            return new_messages, renamed_title
 
         tool_results = []
         for block in response.content:
-            if block.type == "tool_use":
+            if block.type != "tool_use":
+                continue
+            if block.name == "rename_conversation":
+                # Handled here, not via execute_tool/TOOL_FUNCTIONS: this
+                # isn't a data-access tool with a real backing function, and
+                # its "result" (the title) needs to surface out of the loop
+                # to the caller, not just get fed back to Claude.
+                renamed_title = block.input.get("title")
+                result = {"status": "renamed", "title": renamed_title}
+            else:
                 result = await execute_tool(block.name, block.input, allowed_scopes)
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": json.dumps(result),
-                    }
-                )
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps(result),
+                }
+            )
 
         tool_result_message = {"role": "user", "content": tool_results}
         working_messages.append(tool_result_message)
         new_messages.append(tool_result_message)
 
     logger.warning("Hit MAX_TOOL_ITERATIONS (%s) without reaching end_turn", MAX_TOOL_ITERATIONS)
-    return new_messages
+    return new_messages, renamed_title
+
+
+TITLE_SYSTEM_PROMPT = (
+    "Summarize the user's message into a short conversation title (at most "
+    "6 words, no surrounding quotes or trailing punctuation). Respond with "
+    "only the title."
+)
+
+
+async def generate_title(message: str) -> str:
+    """Backs POST /chat/title — a short, stateless summary of a single
+    message, decoupled from run_chat_loop so title generation never blocks
+    on (or is blocked by) the actual chat answer."""
+    if STUB_CLAUDE_API:
+        logger.warning(
+            "STUB Claude API call in orchestration/loop.py's generate_title "
+            "— returning a FAKE title, not calling the real API."
+        )
+        words = message.strip().split()
+        summary = " ".join(words[:6])
+        title = summary[:1].upper() + summary[1:] if summary else "New chat"
+        return f"{title}…" if len(words) > 6 else title
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=32,
+        system=TITLE_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": message}],
+    )
+    return extract_final_text([block.model_dump() for block in response.content]) or "New chat"
 
 
 def extract_final_text(assistant_content: list[dict]) -> str:

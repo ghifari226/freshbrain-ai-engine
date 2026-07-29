@@ -1,0 +1,8 @@
+Run migrations with:
+
+    alembic upgrade head
+
+For a database created with the old db/schema.sql, mark the equivalent initial
+schema as applied before running future migrations:
+
+    alembic stamp 0001

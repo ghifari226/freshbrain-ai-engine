@@ -30,6 +30,30 @@ TOOL_CATALOG_METADATA: dict[str, dict[str, str]] = {
 }
 
 
+def _validate_catalog_consistency(
+    tools: list[dict[str, Any]],
+    scopes: dict[str, str],
+    metadata: dict[str, dict[str, str]],
+) -> None:
+    # Both TOOL_SCOPES and TOOL_CATALOG_METADATA are plain dicts indexed by
+    # tool name, not `.get()`-guarded — a tool registered in `tools`
+    # without matching entries here would otherwise only surface as a
+    # KeyError the first time a request happens to hit that code path.
+    # Failing at import time instead means a drift is caught at startup.
+    names = {tool["name"] for tool in tools}
+    missing_scopes = names - scopes.keys()
+    missing_metadata = names - metadata.keys()
+    if missing_scopes or missing_metadata:
+        raise RuntimeError(
+            "Tool registry drift: "
+            f"missing TOOL_SCOPES for {sorted(missing_scopes) or 'none'}, "
+            f"missing TOOL_CATALOG_METADATA for {sorted(missing_metadata) or 'none'}"
+        )
+
+
+_validate_catalog_consistency(ALL_TOOLS, TOOL_SCOPES, TOOL_CATALOG_METADATA)
+
+
 def scope_grants(allowed_scopes: list[str], required_scope: str) -> bool:
     return any(
         granted == "*" or granted == required_scope or required_scope.startswith(f"{granted}.")

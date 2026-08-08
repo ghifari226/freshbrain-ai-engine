@@ -1,5 +1,7 @@
 from typing import Any
 
+from structlog.testing import capture_logs
+
 from app.chat.orchestration import ChatStatus, run_chat_loop
 from app.chat.stub import StubMessage
 
@@ -77,3 +79,19 @@ async def test_on_status_is_optional() -> None:
         client=client,
     )
     assert new_messages
+
+
+async def test_tool_execution_logs_completion_with_duration() -> None:
+    client = FakeClient([_tool_use_response(), _text_response("here you go")])
+
+    with capture_logs() as logs:
+        await run_chat_loop(
+            [{"role": "user", "content": "how many inbound shipments today?"}],
+            allowed_scopes=["*"],
+            client=client,
+        )
+
+    completed = [entry for entry in logs if entry["event"] == "tool_completed"]
+    assert len(completed) == 1
+    assert completed[0]["tool"] == "get_inbound_count"
+    assert completed[0]["duration_ms"] >= 0

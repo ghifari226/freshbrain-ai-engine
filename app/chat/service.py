@@ -1,9 +1,11 @@
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, NamedTuple
 from uuid import UUID
 
+import structlog
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,8 @@ from app.conversations.repository import ConversationRepository
 from app.conversations.service import parse_uuid
 from app.core.config import get_settings
 from app.worker.repository import JobRepository
+
+logger = structlog.get_logger(__name__)
 
 
 class _ChatContext(NamedTuple):
@@ -90,6 +94,15 @@ class ChatService:
     async def _stream_events(
         self, context: _ChatContext, message: str, allowed_scopes: list[str]
     ) -> AsyncIterator[str]:
+        # RequestLoggingMiddleware's duration_ms is wrong for this endpoint:
+        # Starlette's BaseHTTPMiddleware.call_next() returns as soon as
+        # response headers are sent, which for a StreamingResponse happens
+        # before this generator's body (the actual multi-second chat turn)
+        # has run — so its "request_completed" log only measures
+        # time-to-first-byte here. This logs the real end-to-end duration
+        # instead.
+        start = time.perf_counter()
+
         # A queue bridges run_chat_loop's synchronous-looking on_status
         # callback (invoked from inside the background task below) to this
         # generator's yields — the callback can't yield directly since it
@@ -119,6 +132,12 @@ class ChatService:
             context.conversation, context.conversation_id, new_messages, renamed_title
         )
         yield sse_event("done", response.model_dump())
+
+        logger.info(
+            "chat_stream_completed",
+            conversation_id=str(context.conversation_id),
+            duration_ms=round((time.perf_counter() - start) * 1000, 2),
+        )
 
     async def _finalize(
         self,

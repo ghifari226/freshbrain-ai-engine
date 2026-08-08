@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
+from structlog.testing import capture_logs
 
 from app.chat.schemas import ChatRequest
 from app.chat.service import ChatService
@@ -54,3 +55,17 @@ async def test_stream_raises_before_streaming_starts_for_bad_conversation(db_ses
     with pytest.raises(HTTPException) as error:
         await service.chat_stream(request, str(uuid4()), [])
     assert error.value.status_code == 404
+
+
+async def test_stream_logs_accurate_completion_duration(db_session) -> None:
+    service = ChatService(db_session)
+    request = ChatRequest(message="berapa total warehouse partnership saat ini")
+
+    with capture_logs() as logs:
+        events = await service.chat_stream(request, str(uuid4()), [])
+        await _collect(events)
+
+    completed = [entry for entry in logs if entry["event"] == "chat_stream_completed"]
+    assert len(completed) == 1
+    assert completed[0]["duration_ms"] > 0
+    assert completed[0]["conversation_id"]

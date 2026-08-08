@@ -1,15 +1,17 @@
 import json
-import logging
+import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import structlog
+
 from app.chat.tools import RENAME_TOOL, execute_tool, tools_for_scopes
 from app.integrations.anthropic import AnthropicClient
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 MAX_TOKENS = 4096
 MAX_TOOL_ITERATIONS = 5
 
@@ -99,7 +101,13 @@ async def run_chat_loop(
                 renamed_title = block.input.get("title")
                 result = {"status": "renamed", "title": renamed_title}
             else:
+                tool_start = time.perf_counter()
                 result = await execute_tool(block.name, block.input, allowed_scopes)
+                logger.info(
+                    "tool_completed",
+                    tool=block.name,
+                    duration_ms=round((time.perf_counter() - tool_start) * 1000, 2),
+                )
             results.append(
                 {
                     "type": "tool_result",

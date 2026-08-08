@@ -1,11 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.conversations.schemas import (
     ConversationsListResponse,
     DeleteConversationResponse,
+    MessagesPageResponse,
     RenameConversationRequest,
     RenameConversationResponse,
 )
@@ -22,8 +23,25 @@ Claims = Annotated[TokenClaims, Depends(get_current_claims)]
 async def list_conversations(
     session: Session,
     claims: Claims,
+    limit: Annotated[int | None, Query(gt=0, le=200)] = None,
+    before: Annotated[str | None, Query()] = None,
 ) -> ConversationsListResponse:
-    return await ConversationService(session).list(claims.user_id)
+    # limit omitted entirely -> identical to today's unpaginated response,
+    # see ConversationService.list()'s comment.
+    return await ConversationService(session).list(claims.user_id, limit=limit, before=before)
+
+
+@router.get("/{conversation_id}/messages", response_model=MessagesPageResponse)
+async def list_conversation_messages(
+    conversation_id: str,
+    session: Session,
+    claims: Claims,
+    limit: Annotated[int, Query(gt=0, le=200)] = 50,
+    before: Annotated[str | None, Query()] = None,
+) -> MessagesPageResponse:
+    return await ConversationService(session).list_messages(
+        conversation_id, claims.user_id, limit, before
+    )
 
 
 @router.patch("/{conversation_id}", response_model=RenameConversationResponse)

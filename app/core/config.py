@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     context_window_messages: int = 20
     summary_trigger_messages: int = 40
     worker_poll_interval_seconds: float = 5.0
+    # A crashed worker leaves a job stuck in "processing" forever without
+    # this — claim_next() reclaims anything stuck past the lease as
+    # "pending" (or "failed" once it's already used up its attempts).
+    worker_lease_seconds: float = 300.0
+    worker_max_attempts: int = 3
     # Rate limiting only for now — no cache/locks/queue on Redis yet, not a
     # rule against it, just not needed until something actually calls for it.
     rate_limit_storage_uri: str = "redis://localhost:6379/0"

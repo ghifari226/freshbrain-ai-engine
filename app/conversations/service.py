@@ -10,6 +10,7 @@ from app.conversations.schemas import (
     ConversationMessageOut,
     ConversationOut,
     ConversationsListResponse,
+    MessagesPageResponse,
 )
 
 
@@ -57,10 +58,66 @@ class ConversationService:
         self.session = session
         self.repository = ConversationRepository(session)
 
-    async def list(self, user_id: str) -> ConversationsListResponse:
-        conversations = await self.repository.list_for_user(parse_uuid(user_id, "Invalid user_id"))
+    async def list(
+        self,
+        user_id: str,
+        limit: int | None = None,
+        before: str | None = None,
+    ) -> ConversationsListResponse:
+        parsed_user_id = parse_uuid(user_id, "Invalid user_id")
+        # limit omitted entirely -> existing unpaginated behavior, unchanged
+        # for any caller that hasn't adopted cursor pagination yet.
+        if limit is None:
+            conversations = await self.repository.list_for_user(parsed_user_id)
+            return ConversationsListResponse(
+                conversations=[conversation_to_output(item) for item in conversations]
+            )
+
+        cursor = None
+        if before is not None:
+            cursor = await self.repository.get_conversation_cursor(
+                parse_uuid(before, "Invalid cursor"), parsed_user_id
+            )
+            if cursor is None:
+                raise HTTPException(status_code=400, detail="Invalid cursor")
+
+        conversations, next_cursor = await self.repository.list_for_user_page(
+            parsed_user_id, limit, cursor
+        )
         return ConversationsListResponse(
-            conversations=[conversation_to_output(item) for item in conversations]
+            conversations=[conversation_to_output(item) for item in conversations],
+            next_cursor=str(next_cursor) if next_cursor is not None else None,
+        )
+
+    async def list_messages(
+        self,
+        conversation_id: str,
+        user_id: str,
+        limit: int,
+        before: str | None,
+    ) -> MessagesPageResponse:
+        parsed_conversation_id = parse_uuid(conversation_id, "Invalid conversation_id")
+        parsed_user_id = parse_uuid(user_id, "Invalid user_id")
+        if not await self.repository.exists_owned(parsed_conversation_id, parsed_user_id):
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        cursor = None
+        if before is not None:
+            cursor = await self.repository.get_message_cursor(
+                parse_uuid(before, "Invalid cursor"), parsed_conversation_id
+            )
+            if cursor is None:
+                raise HTTPException(status_code=400, detail="Invalid cursor")
+
+        messages, next_cursor = await self.repository.list_messages_page(
+            parsed_conversation_id, limit, cursor
+        )
+        outputs = [
+            output for output in (message_to_output(message) for message in messages) if output
+        ]
+        return MessagesPageResponse(
+            messages=outputs,
+            next_cursor=str(next_cursor) if next_cursor is not None else None,
         )
 
     async def rename(self, conversation_id: str, user_id: str, title: str) -> None:

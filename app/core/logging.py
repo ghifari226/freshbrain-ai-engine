@@ -1,6 +1,30 @@
 import logging
+from typing import Any
 
 import structlog
+
+# Defense-in-depth only — nothing currently logs these deliberately, this
+# just stops an accidental future `logger.info(..., token=...)` call site
+# from leaking a raw secret into JSON logs.
+_SECRET_KEY_MARKERS = (
+    "password",
+    "token",
+    "secret",
+    "api_key",
+    "apikey",
+    "authorization",
+    "credential",
+)
+_REDACTED = "***REDACTED***"
+
+
+def _redact_secret_fields(
+    logger: Any, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
+    for key in event_dict:
+        if any(marker in key.lower() for marker in _SECRET_KEY_MARKERS):
+            event_dict[key] = _REDACTED
+    return event_dict
 
 
 def configure_logging() -> None:
@@ -11,6 +35,7 @@ def configure_logging() -> None:
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        _redact_secret_fields,
     ]
 
     structlog.configure(

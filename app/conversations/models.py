@@ -30,6 +30,7 @@ class Conversation(Base):
     )
     rolling_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     summarized_through_count: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     messages: Mapped[list["Message"]] = relationship(
         back_populates="conversation",

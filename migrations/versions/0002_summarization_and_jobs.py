@@ -23,14 +23,10 @@ def upgrade() -> None:
     )
     op.create_table(
         "background_jobs",
-        sa.Column(
-            "id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False
-        ),
+        sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
         sa.Column("job_type", sa.String(), nullable=False),
         sa.Column("payload", postgresql.JSONB(), nullable=False),
-        sa.Column(
-            "status", sa.String(), nullable=False, server_default=sa.text("'pending'")
-        ),
+        sa.Column("status", sa.String(), nullable=False, server_default=sa.text("'pending'")),
         sa.Column("attempts", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False

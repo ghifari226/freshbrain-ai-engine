@@ -1,4 +1,6 @@
-from sqlalchemy import delete, select
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.database import engine
@@ -107,3 +109,83 @@ async def test_skip_locked_prevents_concurrent_double_claim() -> None:
                 delete(BackgroundJob).where(BackgroundJob.job_type == "skip_locked_test")
             )
             await cleanup_conn.commit()
+
+
+async def test_mark_failed_retries_until_max_attempts(db_session) -> None:
+    repo = JobRepository(db_session)
+    await repo.enqueue("summarize_conversation", {"conversation_id": "retry-test-convo"})
+    await db_session.commit()
+
+    # worker_max_attempts defaults to 3 — first two failures should retry
+    # (status back to "pending"), the third should finalize as "failed".
+    for _ in range(2):
+        job = await repo.claim_next()
+        assert job is not None
+        assert job.status == "processing"
+        await repo.mark_failed(job.id, "boom")
+        await db_session.refresh(job)
+        assert job.status == "pending"
+
+    job = await repo.claim_next()
+    assert job is not None
+    assert job.attempts == 3
+    await repo.mark_failed(job.id, "boom")
+    await db_session.refresh(job)
+    assert job.status == "failed"
+    assert job.error == "boom"
+
+
+async def test_claim_next_reclaims_stale_processing_job(db_session) -> None:
+    repo = JobRepository(db_session)
+    await repo.enqueue("summarize_conversation", {"conversation_id": "stale-test-convo"})
+    await db_session.commit()
+
+    job = await repo.claim_next()
+    assert job is not None
+    assert job.attempts == 1
+
+    # Simulate a worker that claimed this job and then crashed before
+    # marking it done/failed — backdate updated_at past the lease window.
+    await db_session.execute(
+        update(BackgroundJob)
+        .where(BackgroundJob.id == job.id)
+        .values(updated_at=datetime.now(UTC) - timedelta(hours=1))
+    )
+    await db_session.commit()
+
+    reclaimed = await repo.claim_next()
+    assert reclaimed is not None
+    assert reclaimed.id == job.id
+    assert reclaimed.status == "processing"
+    assert reclaimed.attempts == 2
+
+
+async def test_claim_next_permanently_fails_stale_job_past_max_attempts(db_session) -> None:
+    repo = JobRepository(db_session)
+    await repo.enqueue("summarize_conversation", {"conversation_id": "stale-exhausted-convo"})
+    await db_session.commit()
+
+    row = await db_session.scalar(
+        select(BackgroundJob).where(
+            BackgroundJob.payload["conversation_id"].astext == "stale-exhausted-convo"
+        )
+    )
+    assert row is not None
+    await db_session.execute(
+        update(BackgroundJob)
+        .where(BackgroundJob.id == row.id)
+        .values(
+            status="processing",
+            attempts=3,
+            updated_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+    )
+    await db_session.commit()
+
+    # Not reclaimed as pending — already exhausted, and no other pending
+    # job exists to claim.
+    assert await repo.claim_next() is None
+
+    await db_session.refresh(row)
+    assert row.status == "failed"
+    assert row.error == "Exceeded max attempts after lease timeout"

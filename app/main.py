@@ -16,6 +16,8 @@ from app.core.rate_limit import limiter
 from app.core.request_logging import RequestLoggingMiddleware
 from app.dev.router import router as dev_router
 from app.feedback.router import router as feedback_router
+from app.tool_requests.router import router as tool_requests_router
+from app.tools.router import router as tools_router
 
 configure_logging()
 
@@ -45,6 +47,8 @@ def create_app() -> FastAPI:
     app.include_router(feedback_router)
     app.include_router(conversations_router)
     app.include_router(dev_router)
+    app.include_router(tools_router)
+    app.include_router(tool_requests_router)
     return app
 
 

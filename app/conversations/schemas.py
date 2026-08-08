@@ -17,6 +17,15 @@ class ConversationOut(BaseModel):
 
 class ConversationsListResponse(BaseModel):
     conversations: list[ConversationOut]
+    # Only populated when the request used `limit`/`before` cursor
+    # pagination — omitted (None) for the existing unpaginated call shape,
+    # so current callers that ignore unknown fields see no behavior change.
+    next_cursor: str | None = None
+
+
+class MessagesPageResponse(BaseModel):
+    messages: list[ConversationMessageOut]
+    next_cursor: str | None = None
 
 
 # user_id/role used to live on Rename/Delete requests too — removed since

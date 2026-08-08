@@ -1,4 +1,7 @@
+import asyncio
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -7,13 +10,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.content import extract_final_text
 from app.chat.context import build_chat_context
-from app.chat.orchestration import run_chat_loop
+from app.chat.orchestration import ChatStatus, run_chat_loop
 from app.chat.schemas import ChatRequest, ChatResponse
-from app.conversations.models import Message
+from app.chat.sse import sse_event
+from app.conversations.models import Conversation, Message
 from app.conversations.repository import ConversationRepository
 from app.conversations.service import parse_uuid
 from app.core.config import get_settings
 from app.worker.repository import JobRepository
+
+
+class _ChatContext(NamedTuple):
+    conversation: Conversation
+    conversation_id: UUID
+    history: list[dict[str, Any]]
+    is_new: bool
 
 
 class ChatService:
@@ -26,6 +37,28 @@ class ChatService:
     ) -> ChatResponse:
         # user_id/allowed_scopes come from the verified JWT (see
         # chat/router.py), not the request body — see ChatRequest's comment.
+        context = await self._prepare(request, user_id)
+        new_messages, renamed_title = await run_chat_loop(
+            context.history + [{"role": "user", "content": request.message}],
+            allowed_scopes=allowed_scopes,
+            allow_rename=not context.is_new,
+        )
+        return await self._finalize(
+            context.conversation, context.conversation_id, new_messages, renamed_title
+        )
+
+    async def chat_stream(
+        self, request: ChatRequest, user_id: str, allowed_scopes: list[str]
+    ) -> AsyncIterator[str]:
+        # Prepared eagerly (not inside the generator below) so a bad
+        # conversation_id raises HTTPException before StreamingResponse
+        # starts sending a 200 — once streaming begins the status code is
+        # already committed, so any validation that should produce a real
+        # 4xx has to happen here, before this coroutine returns.
+        context = await self._prepare(request, user_id)
+        return self._stream_events(context, request.message, allowed_scopes)
+
+    async def _prepare(self, request: ChatRequest, user_id: str) -> _ChatContext:
         parsed_user_id = parse_uuid(user_id, "Invalid user_id")
         is_new = request.conversation_id is None
 
@@ -52,12 +85,48 @@ class ChatService:
             "user",
             request.message,
         )
-        new_messages, renamed_title = await run_chat_loop(
-            history + [{"role": "user", "content": request.message}],
-            allowed_scopes=allowed_scopes,
-            allow_rename=not is_new,
-        )
+        return _ChatContext(conversation, conversation_id, history, is_new)
 
+    async def _stream_events(
+        self, context: _ChatContext, message: str, allowed_scopes: list[str]
+    ) -> AsyncIterator[str]:
+        # A queue bridges run_chat_loop's synchronous-looking on_status
+        # callback (invoked from inside the background task below) to this
+        # generator's yields — the callback can't yield directly since it
+        # isn't lexically inside this generator function.
+        queue: asyncio.Queue[ChatStatus | None] = asyncio.Queue()
+
+        async def emit(status: ChatStatus) -> None:
+            await queue.put(status)
+
+        async def run() -> tuple[list[dict[str, Any]], str | None]:
+            try:
+                return await run_chat_loop(
+                    context.history + [{"role": "user", "content": message}],
+                    allowed_scopes=allowed_scopes,
+                    allow_rename=not context.is_new,
+                    on_status=emit,
+                )
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(run())
+        while (status := await queue.get()) is not None:
+            yield sse_event("status", {"status": status.value})
+
+        new_messages, renamed_title = await task
+        response = await self._finalize(
+            context.conversation, context.conversation_id, new_messages, renamed_title
+        )
+        yield sse_event("done", response.model_dump())
+
+    async def _finalize(
+        self,
+        conversation: Conversation,
+        conversation_id: UUID,
+        new_messages: list[dict[str, Any]],
+        renamed_title: str | None,
+    ) -> ChatResponse:
         final_message_id: UUID | None = None
         for message in new_messages:
             stored = await self.conversations.add_message(

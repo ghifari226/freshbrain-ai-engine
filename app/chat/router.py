@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.orchestration import generate_title
@@ -27,6 +28,24 @@ async def chat(
     # Token claims are authoritative — user_id/allowed_scopes never come
     # from the body (see ChatRequest's comment).
     return await ChatService(session).chat(body, claims.user_id, claims.allowed_scopes)
+
+
+@router.post("/chat/stream")
+@limiter.limit(lambda: get_settings().chat_rate_limit)
+async def chat_stream(
+    request: Request,
+    body: ChatRequest,
+    session: Session,
+    claims: Claims,
+) -> StreamingResponse:
+    # SSE wire contract for the deterministic status wording (see
+    # ChatStatus in app/chat/orchestration.py): `event: status` frames
+    # carrying {"status": "understanding" | "fetching_data" | "analyzing"
+    # | "responding"}, followed by one `event: done` frame carrying the
+    # same payload shape as POST /chat's response. The frontend owns the
+    # actual copy shown to users — this only emits the state name.
+    events = await ChatService(session).chat_stream(body, claims.user_id, claims.allowed_scopes)
+    return StreamingResponse(events, media_type="text/event-stream")
 
 
 @router.post("/chat/title", response_model=TitleResponse)

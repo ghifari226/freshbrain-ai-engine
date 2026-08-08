@@ -19,6 +19,16 @@ RENAME_TOOL = load_schema("rename_conversation")
 ALL_TOOLS = [INBOUND_TOOL]
 TOOL_SCOPES = {"get_inbound_count": "wms.inbound"}
 
+# Catalog-only metadata (domain grouping, deploy status, version) — kept
+# separate from the tool schemas above, which are sent to Claude verbatim
+# as `tools=` and must only contain fields the Anthropic API accepts
+# (name/description/input_schema). The codebase is the source of truth for
+# what's "live" — there is no DB table backing this; a tool goes live by
+# being implemented and registered here, not by a database write.
+TOOL_CATALOG_METADATA: dict[str, dict[str, str]] = {
+    "get_inbound_count": {"domain": "wms", "status": "production", "version": "1.0.0"},
+}
+
 
 def scope_grants(allowed_scopes: list[str], required_scope: str) -> bool:
     return any(
@@ -29,6 +39,25 @@ def scope_grants(allowed_scopes: list[str], required_scope: str) -> bool:
 
 def tools_for_scopes(allowed_scopes: list[str]) -> list[dict[str, Any]]:
     return [tool for tool in ALL_TOOLS if scope_grants(allowed_scopes, TOOL_SCOPES[tool["name"]])]
+
+
+def catalog_for_scopes(allowed_scopes: list[str]) -> list[dict[str, Any]]:
+    entries = []
+    for tool in ALL_TOOLS:
+        name = tool["name"]
+        if not scope_grants(allowed_scopes, TOOL_SCOPES[name]):
+            continue
+        metadata = TOOL_CATALOG_METADATA[name]
+        entries.append(
+            {
+                "name": name,
+                "description": tool["description"],
+                "domain": metadata["domain"],
+                "status": metadata["status"],
+                "version": metadata["version"],
+            }
+        )
+    return entries
 
 
 async def execute_tool(

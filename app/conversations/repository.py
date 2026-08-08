@@ -28,6 +28,15 @@ class ConversationRepository:
             .options(selectinload(Conversation.messages))
         )
 
+    async def get_by_id(self, conversation_id: UUID) -> Conversation | None:
+        # Unscoped by user_id — used by the background worker, which isn't
+        # acting on behalf of a specific request-bound user (unlike get_owned).
+        return await self.session.scalar(
+            select(Conversation)
+            .where(Conversation.id == conversation_id)
+            .options(selectinload(Conversation.messages))
+        )
+
     async def list_for_user(self, user_id: UUID) -> list[Conversation]:
         result = await self.session.scalars(
             select(Conversation)

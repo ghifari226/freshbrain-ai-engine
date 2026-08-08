@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 15
+    # Rolling conversation summarization: X = messages always sent raw to
+    # Claude, N = total messages before summarization ever kicks in.
+    context_window_messages: int = 20
+    summary_trigger_messages: int = 40
+    worker_poll_interval_seconds: float = 5.0
+    # Rate limiting only for now — no cache/locks/queue on Redis yet, not a
+    # rule against it, just not needed until something actually calls for it.
+    rate_limit_storage_uri: str = "redis://localhost:6379/0"
+    dev_token_rate_limit: str = "5/minute"
+    chat_rate_limit: str = "20/minute"
 
 
 @lru_cache

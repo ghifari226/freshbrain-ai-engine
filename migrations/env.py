@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.database import sqlalchemy_url
 from app.db.base import Base
 from app.feedback import models as feedback_models  # noqa: F401
+from app.worker import models as worker_models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", sqlalchemy_url(get_settings().database_url))

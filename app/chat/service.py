@@ -2,13 +2,18 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.content import extract_final_text
+from app.chat.context import build_chat_context
 from app.chat.orchestration import run_chat_loop
 from app.chat.schemas import ChatRequest, ChatResponse
+from app.conversations.models import Message
 from app.conversations.repository import ConversationRepository
 from app.conversations.service import parse_uuid
+from app.core.config import get_settings
+from app.worker.repository import JobRepository
 
 
 class ChatService:
@@ -16,7 +21,9 @@ class ChatService:
         self.session = session
         self.conversations = ConversationRepository(session)
 
-    async def chat(self, request: ChatRequest, user_id: str, allowed_scopes: list[str]) -> ChatResponse:
+    async def chat(
+        self, request: ChatRequest, user_id: str, allowed_scopes: list[str]
+    ) -> ChatResponse:
         # user_id/allowed_scopes come from the verified JWT (see
         # chat/router.py), not the request body — see ChatRequest's comment.
         parsed_user_id = parse_uuid(user_id, "Invalid user_id")
@@ -30,10 +37,11 @@ class ChatService:
             conversation = await self.conversations.get_owned(conversation_id, parsed_user_id)
             if conversation is None:
                 raise HTTPException(status_code=404, detail="Conversation not found")
-            history = [
-                {"role": message.role, "content": message.content}
-                for message in conversation.messages
-            ]
+            history = build_chat_context(
+                conversation.messages,
+                conversation.rolling_summary,
+                get_settings().context_window_messages,
+            )
         else:
             conversation = await self.conversations.create(parsed_user_id)
             conversation_id = conversation.id
@@ -66,6 +74,24 @@ class ChatService:
         if renamed_title:
             conversation.title = renamed_title
         await self.session.commit()
+
+        settings = get_settings()
+        # Fresh COUNT(*), not len(conversation.messages) — add_message() above
+        # flushes bare Message rows without appending to the already-loaded
+        # relationship collection, so that collection is stale here.
+        total = await self.session.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(Message.conversation_id == conversation_id)
+        )
+        if (
+            total > settings.summary_trigger_messages
+            and (total - conversation.summarized_through_count) >= settings.context_window_messages
+        ):
+            await JobRepository(self.session).enqueue(
+                "summarize_conversation", {"conversation_id": str(conversation_id)}
+            )
+            await self.session.commit()
 
         return ChatResponse(
             answer=extract_final_text(new_messages[-1]["content"]),

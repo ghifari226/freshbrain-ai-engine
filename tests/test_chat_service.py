@@ -30,6 +30,7 @@ async def test_existing_conversation_lookup_is_ownership_scoped() -> None:
 
 async def test_chat_persists_new_turn_and_final_answer() -> None:
     session = AsyncMock()
+    session.scalar.return_value = 0
     service = ChatService(session)
     service.conversations = AsyncMock()
     conversation_id = uuid4()
@@ -38,6 +39,9 @@ async def test_chat_persists_new_turn_and_final_answer() -> None:
         id=conversation_id,
         title=None,
         last_active_at=None,
+        messages=[],
+        rolling_summary=None,
+        summarized_through_count=0,
     )
     service.conversations.create.return_value = conversation
     service.conversations.add_message.side_effect = [

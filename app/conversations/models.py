@@ -28,6 +28,8 @@ class Conversation(Base):
     last_active_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    rolling_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summarized_through_count: Mapped[int] = mapped_column(default=0, server_default=text("0"))
 
     messages: Mapped[list["Message"]] = relationship(
         back_populates="conversation",

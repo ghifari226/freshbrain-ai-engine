@@ -53,3 +53,26 @@ class AnthropicClient:
             if block.type == "text":
                 return block.text
         return "New chat"
+
+    async def summarize(self, previous_summary: str | None, new_message_texts: list[str]) -> str:
+        if self.settings.stub_claude_api:
+            prefix = f"{previous_summary} " if previous_summary else ""
+            return f"{prefix}[+{len(new_message_texts)} turns]"
+        assert self.client is not None
+        prompt = (
+            f"Previous summary:\n{previous_summary or '(none)'}\n\n"
+            "New messages to fold in:\n" + "\n".join(new_message_texts)
+        )
+        response = await self.client.messages.create(
+            model=self.settings.claude_model,
+            max_tokens=512,
+            system=(
+                "Produce an updated rolling summary of this conversation, "
+                "incorporating the new messages into the previous summary concisely."
+            ),
+            messages=[{"role": "user", "content": prompt}],
+        )
+        for block in response.content:
+            if block.type == "text":
+                return block.text
+        return previous_summary or ""

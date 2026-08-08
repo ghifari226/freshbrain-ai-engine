@@ -15,7 +15,14 @@ dependencies = [
     "httpx>=0.28,<1",
     "pydantic-settings>=2.10,<3",
     "pyjwt>=2.9,<3",
+    # Not slowapi[redis] — that extra pins redis>=3.4.1,<4.0.0, which imports
+    # distutils (removed in Python 3.12+) and won't import at all. limits
+    # (slowapi's dependency) only actually requires redis>=3.0, so a modern
+    # redis client works fine — just don't go through slowapi's own extra.
+    "redis>=5,<6",
+    "slowapi>=0.1.9,<1",
     "sqlalchemy[asyncio]>=2.0.40,<3",
+    "structlog>=24.4,<26",
     "uvicorn[standard]>=0.35,<1",
 ]
 
@@ -29,6 +36,13 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# One shared event loop for the whole session — the module-level async
+# engine's connection pool (app/core/database.py) holds asyncpg connections
+# tied to whichever loop created them; per-test loops (the default) cause
+# "attached to a different loop" errors once more than one test touches the
+# real DB in the same run.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 
 [tool.ruff]
 target-version = "py312"

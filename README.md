@@ -23,6 +23,25 @@ configured.
 If the database was created from the former `db/schema.sql`, use
 `.venv/bin/alembic stamp 0001` once instead of applying the initial migration.
 
+### Auth (self-issued, until chat-gateway is in the live path)
+
+Every endpoint except `POST /dev/token` requires a real HS256-signed JWT —
+`app/core/security.py` verifies it, no gateway involved. Generate a real
+`JWT_SECRET` for your `.env` with:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+To call the API from `/docs`: open Swagger, expand `POST /dev/token`, mint a
+token with `{"user_id": "<uuid>", "role": "Superuser", "allowed_scopes": [...]}`
+(`user_id` must be a real UUID — it's stored as one), copy `access_token`,
+click the "Authorize" padlock, paste it in. From then on every request in
+that Swagger session goes out with it attached. `/dev/token` is a stand-in
+for chat-gateway signing real tokens — delete it (and switch `get_current_claims`
+to verify gateway's signature instead) once chat-gateway is wired into the
+live path (v0.5.0 Beta — see `freshbrain-agreement/VERSIONING.md`).
+
 ## Structure
 
 ```text

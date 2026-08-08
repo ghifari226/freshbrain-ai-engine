@@ -19,20 +19,19 @@ class ConversationsListResponse(BaseModel):
     conversations: list[ConversationOut]
 
 
+# user_id/role used to live on Rename/Delete requests too — removed since
+# the verified JWT (see app/core/security.py) is the only source for
+# identity now, and neither op ever used `role` for anything. The frontend
+# still sends them in the body; FastAPI/Pydantic just ignores unrecognized
+# fields, so that's harmless. Delete has no fields left at all — the router
+# no longer declares a request body for it.
 class RenameConversationRequest(BaseModel):
     title: str
-    user_id: str
-    role: str
 
 
 class RenameConversationResponse(BaseModel):
     conversation_id: str
     title: str
-
-
-class DeleteConversationRequest(BaseModel):
-    user_id: str
-    role: str
 
 
 class DeleteConversationResponse(BaseModel):

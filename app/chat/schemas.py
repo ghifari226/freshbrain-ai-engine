@@ -2,11 +2,12 @@ from pydantic import BaseModel
 
 
 class ChatRequest(BaseModel):
+    # user_id/role/allowed_scopes used to live here too — removed since the
+    # verified JWT (see app/core/security.py) is the only source for those
+    # now. The frontend still sends them in the body; FastAPI/Pydantic just
+    # ignores unrecognized fields, so that's harmless.
     message: str
     conversation_id: str | None = None
-    user_id: str | None = None
-    role: str | None = None
-    allowed_scopes: list[str] | None = None
 
 
 class ChatResponse(BaseModel):

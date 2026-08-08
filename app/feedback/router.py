@@ -1,22 +1,23 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
-from app.core.security import authenticated_user_id
+from app.core.security import TokenClaims, get_current_claims
 from app.feedback.schemas import FeedbackRequest, FeedbackResponse
 from app.feedback.service import FeedbackService
 
 router = APIRouter(tags=["feedback"])
 Session = Annotated[AsyncSession, Depends(get_session)]
+Claims = Annotated[TokenClaims, Depends(get_current_claims)]
 
 
 @router.post("/feedback", response_model=FeedbackResponse)
 async def feedback(
     request: FeedbackRequest,
     session: Session,
-    authorization: str | None = Header(default=None),
+    claims: Claims,
 ) -> FeedbackResponse:
-    authenticated_user_id(request.user_id, authorization)
-    return await FeedbackService(session).add(request)
+    # Token claims are authoritative — see chat/router.py's chat() for why.
+    return await FeedbackService(session).add(request, claims.user_id, claims.role)

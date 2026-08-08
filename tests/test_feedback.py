@@ -13,12 +13,10 @@ async def test_down_rating_requires_reason() -> None:
     request = FeedbackRequest(
         message_id=str(uuid4()),
         conversation_id=str(uuid4()),
-        user_id=str(uuid4()),
-        role="user",
         rating="down",
     )
 
     with pytest.raises(HTTPException) as error:
-        await service.add(request)
+        await service.add(request, str(uuid4()), "user")
 
     assert error.value.status_code == 400

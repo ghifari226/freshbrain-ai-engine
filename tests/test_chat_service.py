@@ -19,11 +19,9 @@ async def test_existing_conversation_lookup_is_ownership_scoped() -> None:
 
     with pytest.raises(HTTPException) as error:
         await service.chat(
-            ChatRequest(
-                message="hello",
-                conversation_id=str(conversation_id),
-                user_id=str(user_id),
-            )
+            ChatRequest(message="hello", conversation_id=str(conversation_id)),
+            str(user_id),
+            [],
         )
 
     service.conversations.get_owned.assert_awaited_once_with(conversation_id, user_id)
@@ -56,7 +54,7 @@ async def test_chat_persists_new_turn_and_final_answer() -> None:
             )
         ),
     ):
-        response = await service.chat(ChatRequest(message="hello", user_id=str(uuid4())))
+        response = await service.chat(ChatRequest(message="hello"), str(uuid4()), [])
 
     assert response.answer == "Hi"
     assert response.conversation_id == str(conversation_id)

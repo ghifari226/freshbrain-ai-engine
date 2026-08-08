@@ -12,7 +12,9 @@ class FeedbackService:
         self.session = session
         self.repository = FeedbackRepository(session)
 
-    async def add(self, request: FeedbackRequest) -> FeedbackResponse:
+    async def add(self, request: FeedbackRequest, user_id: str, role: str) -> FeedbackResponse:
+        # user_id/role come from the verified JWT (see feedback/router.py),
+        # not the request body — see FeedbackRequest's comment.
         if request.rating not in {"up", "down"}:
             raise HTTPException(status_code=400, detail="Invalid rating")
         if request.rating == "down" and not request.reason:
@@ -24,8 +26,8 @@ class FeedbackService:
             Feedback(
                 message_id=parse_uuid(request.message_id),
                 conversation_id=parse_uuid(request.conversation_id),
-                user_id=parse_uuid(request.user_id),
-                role=request.role,
+                user_id=parse_uuid(user_id),
+                role=role,
                 rating=request.rating,
                 reason=request.reason,
                 comment=request.comment,

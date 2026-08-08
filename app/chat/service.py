@@ -16,10 +16,10 @@ class ChatService:
         self.session = session
         self.conversations = ConversationRepository(session)
 
-    async def chat(self, request: ChatRequest) -> ChatResponse:
-        if not request.user_id:
-            raise HTTPException(status_code=401, detail="Token does not match user_id")
-        user_id = parse_uuid(request.user_id, "Invalid user_id")
+    async def chat(self, request: ChatRequest, user_id: str, allowed_scopes: list[str]) -> ChatResponse:
+        # user_id/allowed_scopes come from the verified JWT (see
+        # chat/router.py), not the request body — see ChatRequest's comment.
+        parsed_user_id = parse_uuid(user_id, "Invalid user_id")
         is_new = request.conversation_id is None
 
         if request.conversation_id:
@@ -27,7 +27,7 @@ class ChatService:
                 request.conversation_id,
                 "Invalid conversation_id",
             )
-            conversation = await self.conversations.get_owned(conversation_id, user_id)
+            conversation = await self.conversations.get_owned(conversation_id, parsed_user_id)
             if conversation is None:
                 raise HTTPException(status_code=404, detail="Conversation not found")
             history = [
@@ -35,7 +35,7 @@ class ChatService:
                 for message in conversation.messages
             ]
         else:
-            conversation = await self.conversations.create(user_id)
+            conversation = await self.conversations.create(parsed_user_id)
             conversation_id = conversation.id
             history = []
 
@@ -46,7 +46,7 @@ class ChatService:
         )
         new_messages, renamed_title = await run_chat_loop(
             history + [{"role": "user", "content": request.message}],
-            allowed_scopes=request.allowed_scopes or [],
+            allowed_scopes=allowed_scopes,
             allow_rename=not is_new,
         )
 

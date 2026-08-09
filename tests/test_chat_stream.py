@@ -28,8 +28,8 @@ async def test_stream_direct_answer_emits_status_then_done(db_session) -> None:
     events = await service.chat_stream(request, str(uuid4()), [])
     chunks = await _collect(events)
 
-    assert [event for event, _ in chunks] == ["status", "status", "done"]
-    assert [data["status"] for _, data in chunks[:2]] == ["understanding", "responding"]
+    assert [event for event, _ in chunks] == ["status", "done"]
+    assert chunks[0][1]["status"] == "understanding"
     done_event, done_data = chunks[-1]
     assert done_event == "done"
     assert "32 warehouse partnership" in done_data["answer"]
@@ -44,7 +44,7 @@ async def test_stream_tool_use_emits_full_status_sequence(db_session) -> None:
     chunks = await _collect(events)
 
     statuses = [data["status"] for event, data in chunks if event == "status"]
-    assert statuses == ["understanding", "fetching_data", "analyzing", "responding"]
+    assert statuses == ["understanding", "fetching_data", "analyzing"]
     assert chunks[-1][0] == "done"
 
 

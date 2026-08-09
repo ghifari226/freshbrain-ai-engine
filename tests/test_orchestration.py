@@ -46,7 +46,7 @@ async def test_status_sequence_for_direct_answer() -> None:
         on_status=record,
     )
 
-    assert statuses == [ChatStatus.UNDERSTANDING, ChatStatus.RESPONDING]
+    assert statuses == [ChatStatus.UNDERSTANDING]
 
 
 async def test_status_sequence_for_tool_call_then_answer() -> None:
@@ -67,7 +67,6 @@ async def test_status_sequence_for_tool_call_then_answer() -> None:
         ChatStatus.UNDERSTANDING,
         ChatStatus.FETCHING_DATA,
         ChatStatus.ANALYZING,
-        ChatStatus.RESPONDING,
     ]
 
 

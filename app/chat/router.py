@@ -40,10 +40,11 @@ async def chat_stream(
 ) -> StreamingResponse:
     # SSE wire contract for the deterministic status wording (see
     # ChatStatus in app/chat/orchestration.py): `event: status` frames
-    # carrying {"status": "understanding" | "fetching_data" | "analyzing"
-    # | "responding"}, followed by one `event: done` frame carrying the
-    # same payload shape as POST /chat's response. The frontend owns the
-    # actual copy shown to users — this only emits the state name.
+    # carrying {"status": "understanding" | "fetching_data" | "analyzing"},
+    # followed by one `event: done` frame carrying the same payload shape
+    # as POST /chat's response — no terminal "responding" status, the
+    # final answer itself is the output. The frontend owns the actual
+    # copy shown to users — this only emits the state name.
     events = await ChatService(session).chat_stream(body, claims.user_id, claims.allowed_scopes)
     return StreamingResponse(events, media_type="text/event-stream")
 

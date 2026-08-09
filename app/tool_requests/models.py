@@ -27,10 +27,13 @@ class ToolRequest(Base):
     title: Mapped[str] = mapped_column(String)
     description: Mapped[str] = mapped_column(Text)
     domain: Mapped[str] = mapped_column(String)
-    # "staging" here means "an engineer has picked this up and is
-    # implementing it" — the request's own review pipeline, unrelated to
-    # the Live Tool Catalog's staging/production deploy status for the
-    # eventual tool (a separate, code-owned concept).
+    # draft/posted/live — a plain field, not a state machine. No staging
+    # state, no promote/fulfill actions; ToolRequestService.set_status()
+    # can move it to any of the three directly. Content is frozen once
+    # live (see update_content()), but reaching live isn't gated on any
+    # prior status. Unrelated to the Live Tool Catalog's own
+    # staging/production deploy status for the eventual tool (a separate,
+    # code-owned concept, see app/chat/tools.py).
     status: Mapped[str] = mapped_column(String, default="draft", server_default=text("'draft'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

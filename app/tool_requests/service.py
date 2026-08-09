@@ -8,10 +8,10 @@ from app.tool_requests.models import ToolRequest
 from app.tool_requests.repository import ToolRequestRepository
 from app.tool_requests.schemas import ToolRequestCreate, ToolRequestOut, ToolRequestUpdate
 
-# The draft<->posted toggle only ever moves between these two — promote is
-# the only way out of "posted", and there's no way back in from "staging"
-# or "live" (those are one-directional, see promote()/fulfill() below).
-_TOGGLE_STATUSES = {"draft", "posted"}
+# No transition legality beyond "target is one of these" — set_status() is
+# a plain setter, not a state machine. draft->live directly is legal; the
+# only enforced rule is content freezing once live (see update_content()).
+_VALID_STATUSES = {"draft", "posted", "live"}
 
 
 def _to_out(request: ToolRequest) -> ToolRequestOut:
@@ -44,7 +44,7 @@ class ToolRequestService:
     async def update_content(self, request_id: UUID, body: ToolRequestUpdate) -> ToolRequestOut:
         request = await self._get_or_404(request_id)
         if request.status == "live":
-            raise HTTPException(status_code=409, detail="Promoted requests are read-only")
+            raise HTTPException(status_code=409, detail="Live requests are read-only")
         request.title = body.title
         request.description = body.description
         request.domain = body.domain
@@ -52,36 +52,12 @@ class ToolRequestService:
         return _to_out(request)
 
     async def set_status(self, request_id: UUID, target_status: str) -> ToolRequestOut:
-        if target_status not in _TOGGLE_STATUSES:
-            raise HTTPException(status_code=400, detail="status must be 'draft' or 'posted'")
-        request = await self._get_or_404(request_id)
-        if request.status not in _TOGGLE_STATUSES:
+        if target_status not in _VALID_STATUSES:
             raise HTTPException(
-                status_code=409, detail=f"Cannot change status from '{request.status}'"
+                status_code=400, detail="status must be one of 'draft', 'posted', 'live'"
             )
+        request = await self._get_or_404(request_id)
         request.status = target_status
-        await self._touch_and_commit(request)
-        return _to_out(request)
-
-    async def promote(self, request_id: UUID) -> ToolRequestOut:
-        request = await self._get_or_404(request_id)
-        if request.status != "posted":
-            raise HTTPException(status_code=409, detail="Only posted requests can be promoted")
-        request.status = "staging"
-        await self._touch_and_commit(request)
-        return _to_out(request)
-
-    async def fulfill(self, request_id: UUID) -> ToolRequestOut:
-        # Called once an AI engineer has actually implemented + registered
-        # the tool in code (app/chat/tools.py) and deployed it — this only
-        # records that the request has been fulfilled, it doesn't touch
-        # the Live Tool Catalog itself.
-        request = await self._get_or_404(request_id)
-        if request.status != "staging":
-            raise HTTPException(
-                status_code=409, detail="Only staging requests can be marked fulfilled"
-            )
-        request.status = "live"
         await self._touch_and_commit(request)
         return _to_out(request)
 

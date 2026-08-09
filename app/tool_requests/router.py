@@ -63,25 +63,7 @@ async def update_tool_request_status(
     session: Session,
     claims: Claims,
 ) -> ToolRequestOut:
+    # The only status-changing endpoint — a plain setter (draft/posted/live),
+    # no promote/fulfill ceremony. See ToolRequestService.set_status().
     _require_scope(claims, "tools.request_status")
     return await ToolRequestService(session).set_status(parse_uuid(request_id), body.status)
-
-
-@router.post("/{request_id}/promote", response_model=ToolRequestOut)
-async def promote_tool_request(
-    request_id: str,
-    session: Session,
-    claims: Claims,
-) -> ToolRequestOut:
-    _require_scope(claims, "tools.request_promote")
-    return await ToolRequestService(session).promote(parse_uuid(request_id))
-
-
-@router.post("/{request_id}/fulfill", response_model=ToolRequestOut)
-async def fulfill_tool_request(
-    request_id: str,
-    session: Session,
-    claims: Claims,
-) -> ToolRequestOut:
-    _require_scope(claims, "tools.request_fulfill")
-    return await ToolRequestService(session).fulfill(parse_uuid(request_id))

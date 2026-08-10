@@ -40,16 +40,10 @@ def message_to_output(message: Message) -> ConversationMessageOut | None:
 
 
 def conversation_to_output(conversation: Conversation) -> ConversationOut:
-    messages = [
-        output
-        for output in (message_to_output(message) for message in conversation.messages)
-        if output is not None
-    ]
     return ConversationOut(
         id=str(conversation.id),
         title=conversation.title or "",
         timestamp=conversation.last_active_at.isoformat(),
-        messages=messages,
     )
 
 

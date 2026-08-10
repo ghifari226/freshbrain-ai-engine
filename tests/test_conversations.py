@@ -7,17 +7,24 @@ from sqlalchemy import select
 
 from app.conversations.models import Conversation, Message
 from app.conversations.repository import ConversationRepository
-from app.conversations.service import ConversationService, conversation_to_output
+from app.conversations.service import ConversationService, conversation_to_output, message_to_output
 
 
-def test_conversation_projection_hides_synthetic_tool_messages() -> None:
+def test_conversation_projection_defaults_null_title_to_empty_string() -> None:
     conversation = Conversation(
         id=uuid4(),
         user_id=uuid4(),
         title=None,
         last_active_at=datetime.now(UTC),
     )
-    conversation.messages = [
+
+    output = conversation_to_output(conversation)
+
+    assert output.title == ""
+
+
+def test_message_to_output_hides_synthetic_tool_messages() -> None:
+    messages = [
         Message(
             id=uuid4(),
             role="user",
@@ -44,10 +51,9 @@ def test_conversation_projection_hides_synthetic_tool_messages() -> None:
         ),
     ]
 
-    output = conversation_to_output(conversation)
+    outputs = [message_to_output(message) for message in messages]
 
-    assert output.title == ""
-    assert [message.text for message in output.messages] == ["hello", "hi"]
+    assert [output.text for output in outputs if output is not None] == ["hello", "hi"]
 
 
 async def test_delete_is_soft_and_hides_from_reads(db_session) -> None:

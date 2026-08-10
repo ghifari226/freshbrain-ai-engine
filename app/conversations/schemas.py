@@ -12,7 +12,6 @@ class ConversationOut(BaseModel):
     id: str
     title: str
     timestamp: str
-    messages: list[ConversationMessageOut]
 
 
 class ConversationsListResponse(BaseModel):

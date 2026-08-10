@@ -51,7 +51,6 @@ class ConversationRepository:
                 Conversation.user_id == user_id,
                 Conversation.deleted_at.is_(None),
             )
-            .options(selectinload(Conversation.messages))
             .order_by(Conversation.last_active_at.desc())
         )
         return list(result)
@@ -71,13 +70,9 @@ class ConversationRepository:
     async def list_for_user_page(
         self, user_id: UUID, limit: int, cursor: Cursor | None
     ) -> tuple[list[Conversation], UUID | None]:
-        query = (
-            select(Conversation)
-            .where(
-                Conversation.user_id == user_id,
-                Conversation.deleted_at.is_(None),
-            )
-            .options(selectinload(Conversation.messages))
+        query = select(Conversation).where(
+            Conversation.user_id == user_id,
+            Conversation.deleted_at.is_(None),
         )
         if cursor is not None:
             query = query.where(

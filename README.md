@@ -5,9 +5,7 @@ feedback, and internal data tools.
 
 ## Local development
 
-Requires Python 3.12+, PostgreSQL, and Redis (currently used only for rate
-limiting — no cache, locks, or queue backend yet; that's a scoping choice for
-now, not a rule against ever using Redis for those later).
+Requires Python 3.12+ and PostgreSQL.
 
 ```bash
 python -m venv .venv
@@ -74,7 +72,7 @@ reclaim, which is an accepted gap at this stage, not an oversight.
 ### Rate limiting
 
 `POST /dev/token`, `POST /chat`, and `POST /chat/title` are rate limited
-(`slowapi`, Redis-backed storage, per-IP) — see `app/core/rate_limit.py` and
+(`slowapi`, in-memory storage, per-IP) — see `app/core/rate_limit.py` and
 `DEV_TOKEN_RATE_LIMIT`/`CHAT_RATE_LIMIT` in `.env.example`. `/dev/token` is
 limited tighter (5/minute) since it's unauthenticated and otherwise
 spammable; `/chat`/`/chat/title` protect the paid Claude API.

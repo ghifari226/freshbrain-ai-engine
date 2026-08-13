@@ -36,9 +36,6 @@ class Settings(BaseSettings):
     # "pending" (or "failed" once it's already used up its attempts).
     worker_lease_seconds: float = 300.0
     worker_max_attempts: int = 3
-    # Rate limiting only for now — no cache/locks/queue on Redis yet, not a
-    # rule against it, just not needed until something actually calls for it.
-    rate_limit_storage_uri: str = "redis://localhost:6379/0"
     dev_token_rate_limit: str = "5/minute"
     chat_rate_limit: str = "20/minute"
 

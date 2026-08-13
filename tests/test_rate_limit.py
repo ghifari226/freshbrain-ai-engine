@@ -12,8 +12,8 @@ async def test_dev_token_rate_limited() -> None:
     # handler for header injection). So the only way to redirect enforcement
     # for a test is to swap this instance's storage/strategy in place,
     # rather than replacing app.state.limiter (which does nothing here).
-    # Avoids needing a real Redis and avoids polluting the real Redis-backed
-    # counter across test runs. Restored afterward.
+    # Avoids polluting the module-level limiter's shared in-memory counter
+    # across test runs. Restored afterward.
     original_storage = rate_limiter._storage
     original_strategy = rate_limiter._limiter
     memory_storage = MemoryStorage()

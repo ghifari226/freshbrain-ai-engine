@@ -88,11 +88,17 @@ async def create_stub_message(
                 return _text_message(
                     f'Baik, saya ubah judul percakapan ini jadi "{result.get("title", "")}".'
                 )
+            envelope_status = result.get("status")
+            if envelope_status == "NO_DATA":
+                return _text_message("No inbound shipments found for that date/status.")
+            if envelope_status == "UPSTREAM_ERROR":
+                return _text_message("Couldn't retrieve that data right now.")
+            data = result.get("data") or {}
             return _text_message(
                 "[STUBBED RESPONSE] Based on stubbed WMS data, there are "
-                f"{result.get('count', 'an unknown number of')} inbound shipments "
-                f"with status '{result.get('status', '?')}' on "
-                f"{result.get('date', '?')}."
+                f"{data.get('count', 'an unknown number of')} inbound shipments "
+                f"with status '{data.get('status', '?')}' on "
+                f"{data.get('date', '?')}."
             )
 
     text = _last_user_text(messages)

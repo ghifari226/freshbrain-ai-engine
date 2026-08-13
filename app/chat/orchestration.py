@@ -30,6 +30,11 @@ class ChatStatus(StrEnum):
 
 
 StatusCallback = Callable[[ChatStatus], Awaitable[None]]
+# Invoked as on_tool_call(tool_name, tool_input, status, duration_ms), right
+# alongside the tool_completed structlog event below — same scope, same
+# data. Kept as a callback (rather than importing a DB session here) so
+# orchestration.py stays persistence-agnostic; ChatService supplies it.
+ToolCallCallback = Callable[[str, dict[str, Any], str, float], Awaitable[None]]
 TITLE_SYSTEM_PROMPT = (
     "Summarize the user's message into a short conversation title (at most "
     "6 words, no surrounding quotes or trailing punctuation). Respond with "
@@ -46,6 +51,15 @@ def build_system_prompt() -> str:
         "Use the available tools to answer operational questions accurately. "
         "If a question requires data you don't have a tool for, say so rather "
         "than guessing.\n\n"
+        "Tool results carry a `status` field: SUCCESS, NO_DATA, or "
+        "UPSTREAM_ERROR. On NO_DATA, the query was valid and authorized but "
+        "genuinely found nothing — tell the user no matching data was found; "
+        "don't guess a reason, and don't treat it the same as a SUCCESS "
+        "result with a zero/empty value unless that's literally what the "
+        "tool's data says. On UPSTREAM_ERROR, the data could not be "
+        "retrieved — tell the user it couldn't be retrieved right now; "
+        "don't present it as a real answer or invent an explanation for "
+        "why.\n\n"
         "If the user pastes a password, API key, token, or other credential "
         "into the conversation, don't repeat it back verbatim — warn them "
         "that it may have been exposed and suggest they rotate it."
@@ -58,6 +72,7 @@ async def run_chat_loop(
     allow_rename: bool = False,
     client: AnthropicClient | None = None,
     on_status: StatusCallback | None = None,
+    on_tool_call: ToolCallCallback | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     async def emit(status: ChatStatus) -> None:
         if on_status is not None:
@@ -104,11 +119,12 @@ async def run_chat_loop(
             else:
                 tool_start = time.perf_counter()
                 result = await execute_tool(block.name, block.input, allowed_scopes)
-                logger.info(
-                    "tool_completed",
-                    tool=block.name,
-                    duration_ms=round((time.perf_counter() - tool_start) * 1000, 2),
-                )
+                duration_ms = round((time.perf_counter() - tool_start) * 1000, 2)
+                logger.info("tool_completed", tool=block.name, duration_ms=duration_ms)
+                if on_tool_call is not None:
+                    await on_tool_call(
+                        block.name, block.input, result.get("status", "ERROR"), duration_ms
+                    )
             results.append(
                 {
                     "type": "tool_result",

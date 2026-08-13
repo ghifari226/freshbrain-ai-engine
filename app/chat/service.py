@@ -19,6 +19,7 @@ from app.conversations.models import Conversation, Message
 from app.conversations.repository import ConversationRepository
 from app.conversations.service import parse_uuid
 from app.core.config import get_settings
+from app.observability.repository import ToolCallLogRepository
 from app.worker.repository import JobRepository
 
 logger = structlog.get_logger(__name__)
@@ -35,6 +36,25 @@ class ChatService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.conversations = ConversationRepository(session)
+        self.tool_call_logs = ToolCallLogRepository(session)
+
+    def _tool_call_logger(self, conversation_id: UUID, user_id: UUID) -> Any:
+        # message_id is left unset here — the message containing this tool
+        # call hasn't been persisted yet at this point (that only happens in
+        # _finalize, once run_chat_loop returns), so there's no id to
+        # correlate against.
+        async def record(tool_name: str, tool_input: dict, status: str, duration_ms: float) -> None:
+            await self.tool_call_logs.record(
+                conversation_id=conversation_id,
+                message_id=None,
+                tool_name=tool_name,
+                tool_input=tool_input,
+                status=status,
+                duration_ms=duration_ms,
+                user_id=user_id,
+            )
+
+        return record
 
     async def chat(
         self, request: ChatRequest, user_id: str, allowed_scopes: list[str]
@@ -46,6 +66,9 @@ class ChatService:
             context.history + [{"role": "user", "content": request.message}],
             allowed_scopes=allowed_scopes,
             allow_rename=not context.is_new,
+            on_tool_call=self._tool_call_logger(
+                context.conversation_id, parse_uuid(user_id, "Invalid user_id")
+            ),
         )
         return await self._finalize(
             context.conversation, context.conversation_id, new_messages, renamed_title
@@ -60,7 +83,7 @@ class ChatService:
         # already committed, so any validation that should produce a real
         # 4xx has to happen here, before this coroutine returns.
         context = await self._prepare(request, user_id)
-        return self._stream_events(context, request.message, allowed_scopes)
+        return self._stream_events(context, request.message, user_id, allowed_scopes)
 
     async def _prepare(self, request: ChatRequest, user_id: str) -> _ChatContext:
         parsed_user_id = parse_uuid(user_id, "Invalid user_id")
@@ -92,7 +115,7 @@ class ChatService:
         return _ChatContext(conversation, conversation_id, history, is_new)
 
     async def _stream_events(
-        self, context: _ChatContext, message: str, allowed_scopes: list[str]
+        self, context: _ChatContext, message: str, user_id: str, allowed_scopes: list[str]
     ) -> AsyncIterator[str]:
         # RequestLoggingMiddleware's duration_ms is wrong for this endpoint:
         # Starlette's BaseHTTPMiddleware.call_next() returns as soon as
@@ -119,6 +142,9 @@ class ChatService:
                     allowed_scopes=allowed_scopes,
                     allow_rename=not context.is_new,
                     on_status=emit,
+                    on_tool_call=self._tool_call_logger(
+                        context.conversation_id, parse_uuid(user_id, "Invalid user_id")
+                    ),
                 )
             finally:
                 await queue.put(None)

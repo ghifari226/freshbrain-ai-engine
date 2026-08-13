@@ -1,7 +1,9 @@
+import json
 from typing import Any
 
 from structlog.testing import capture_logs
 
+from app.chat import orchestration
 from app.chat.orchestration import ChatStatus, run_chat_loop
 from app.chat.stub import StubMessage
 
@@ -94,3 +96,27 @@ async def test_tool_execution_logs_completion_with_duration() -> None:
     assert len(completed) == 1
     assert completed[0]["tool"] == "get_inbound_count"
     assert completed[0]["duration_ms"] >= 0
+
+
+async def test_no_data_tool_result_is_not_misrepresented_as_success(
+    monkeypatch: Any,
+) -> None:
+    # A NO_DATA envelope must survive execute_tool() -> tool_result content
+    # unchanged — it must not get flattened into a bare count/zero anywhere
+    # in the plumbing, since that would let a real "found nothing" look
+    # identical to a real "found zero of something" SUCCESS response.
+    async def fake_execute_tool(name: str, tool_input: dict, allowed_scopes: list[str]) -> dict:
+        return {"status": "NO_DATA", "data": None}
+
+    monkeypatch.setattr(orchestration, "execute_tool", fake_execute_tool)
+
+    client = FakeClient([_tool_use_response(), _text_response("here you go")])
+    new_messages, _ = await run_chat_loop(
+        [{"role": "user", "content": "how many inbound shipments today?"}],
+        allowed_scopes=["*"],
+        client=client,
+    )
+
+    tool_result_message = new_messages[1]
+    tool_result_content = json.loads(tool_result_message["content"][0]["content"])
+    assert tool_result_content == {"status": "NO_DATA", "data": None}

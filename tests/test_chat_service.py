@@ -5,8 +5,8 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from app.chat.schemas import ChatRequest
-from app.chat.service import ChatService
+from app.ai.chat.schemas import ChatRequest
+from app.ai.chat.service import ChatService
 
 
 async def test_existing_conversation_lookup_is_ownership_scoped() -> None:
@@ -50,7 +50,7 @@ async def test_chat_persists_new_turn_and_final_answer() -> None:
     ]
 
     with patch(
-        "app.chat.service.run_chat_loop",
+        "app.ai.chat.service.run_chat_loop",
         new=AsyncMock(
             return_value=(
                 [{"role": "assistant", "content": [{"type": "text", "text": "Hi"}]}],

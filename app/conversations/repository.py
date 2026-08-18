@@ -5,12 +5,12 @@ from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.conversations.models import Conversation, Message
-from app.db.types import ClaudeContent
+from app.conversations.models import ClaudeContent, Conversation, Message
 
 Cursor = tuple[datetime, UUID]
 
 
+# Repository memusatkan query database agar service tidak bergantung pada detail SQL.
 class ConversationRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -33,8 +33,6 @@ class ConversationRepository:
         )
 
     async def get_by_id(self, conversation_id: UUID) -> Conversation | None:
-        # Unscoped by user_id — used by the background worker, which isn't
-        # acting on behalf of a specific request-bound user (unlike get_owned).
         return await self.session.scalar(
             select(Conversation)
             .where(
@@ -131,9 +129,6 @@ class ConversationRepository:
         return result.scalar_one_or_none() is not None
 
     async def delete(self, conversation_id: UUID, user_id: UUID) -> bool:
-        # Soft delete — messages stay in place, filtered out of reads via
-        # deleted_at, so retention policy can be decided later without a
-        # separate recovery mechanism to build.
         result = await self.session.execute(
             update(Conversation)
             .where(

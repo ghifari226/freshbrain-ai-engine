@@ -8,9 +8,6 @@ from app.tool_requests.models import ToolRequest
 from app.tool_requests.repository import ToolRequestRepository
 from app.tool_requests.schemas import ToolRequestCreate, ToolRequestOut, ToolRequestUpdate
 
-# No transition legality beyond "target is one of these" — set_status() is
-# a plain setter, not a state machine. draft->live directly is legal; the
-# only enforced rule is content freezing once live (see update_content()).
 _VALID_STATUSES = {"draft", "posted", "live"}
 
 
@@ -62,11 +59,6 @@ class ToolRequestService:
         return _to_out(request)
 
     async def _touch_and_commit(self, request: ToolRequest) -> None:
-        # Set explicitly rather than relying on the model's onupdate=func.now()
-        # — a DB-computed onupdate value expires the attribute after flush
-        # (same reason app/chat/service.py sets Conversation.last_active_at
-        # explicitly), which would force an unsafe lazy-refresh the moment
-        # _to_out() reads it back synchronously right after commit().
         request.updated_at = datetime.now(UTC)
         await self.session.commit()
 

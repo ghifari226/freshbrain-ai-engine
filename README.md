@@ -16,11 +16,11 @@ docker compose -f ../freshbrain-ai-engine-db/docker-compose.yml up -d
 .venv/bin/uvicorn app.main:app --reload
 ```
 
-In a second terminal, run the background worker (polls for jobs — currently
+In a second terminal, run the background job runner (polls for jobs — currently
 just rolling conversation summarization, see below):
 
 ```bash
-.venv/bin/python -m app.worker
+.venv/bin/python -m app.jobs
 ```
 
 The Claude and WMS integrations default to explicit stub behavior. Set
@@ -55,13 +55,13 @@ live path (v0.5.0 Beta — see `freshbrain-agreement/VERSIONING.md`).
 `ChatService.chat()` no longer sends a conversation's full message history to
 Claude. Once a conversation passes `SUMMARY_TRIGGER_MESSAGES` (default 40)
 total messages, it enqueues a `summarize_conversation` background job every
-`CONTEXT_WINDOW_MESSAGES` (default 20) messages; the worker folds the
+`CONTEXT_WINDOW_MESSAGES` (default 20) messages; the job runner folds the
 newly-aged-out messages into `conversations.rolling_summary`. Every `/chat`
 request then sends `rolling_summary` (if present) plus the last
 `CONTEXT_WINDOW_MESSAGES` raw messages instead of the whole history — see
-`app/chat/context.py`'s `build_chat_context()`.
+`app/ai/chat/context.py`'s `build_chat_context()`.
 
-The job queue (`background_jobs` table, `app/worker/`) is Postgres-backed,
+The job queue (`background_jobs` table, `app/jobs/`) is Postgres-backed,
 not Redis — claimed via `SELECT ... FOR UPDATE SKIP LOCKED`, deduplicated via
 a partial unique index on `(job_type, payload->>'conversation_id') WHERE
 status = 'pending'`. No retry/backoff beyond a basic `attempts` counter, no
@@ -91,22 +91,42 @@ there's more than this one service to trace across.
 
 ```text
 app/
-├── chat/             # routes, application workflow, model loop, and tools
-├── conversations/    # schemas, service, repository, and ORM models
-├── core/             # settings, database lifecycle, auth, logging, rate limiting
-├── feedback/         # schemas, service, repository, and ORM model
-├── integrations/     # Anthropic, warehouse, and WMS clients
-└── worker/           # Postgres-backed background job queue + poll loop
+├── main.py                    # composition root aplikasi FastAPI
+├── ai/
+│   ├── chat/                  # transport chat, workflow, context, dan agent loop
+│   ├── llm/anthropic/         # adapter SDK Anthropic dan stub lokal
+│   └── tools/                 # catalog, izin, eksekusi, dan API tool
+├── conversations/             # model, schema, repository, service, dan router
+├── core/                      # config, database, auth, logging, dan rate limit
+├── dev/                       # endpoint khusus pengembangan lokal
+├── feedback/                  # fitur feedback pengguna
+├── integrations/              # adapter warehouse dan WMS
+├── jobs/                      # antrean job PostgreSQL dan job runner
+├── resources/tools/           # schema JSON yang dikirim ke model AI
+├── tool_call_logs/            # jejak pemanggilan tool oleh model AI
+└── tool_requests/             # permintaan bisnis untuk tool baru
 ```
 
 Routers handle HTTP concerns, services coordinate application behavior,
 repositories contain persistence queries, and integrations own external I/O.
 
+Aliran dependensi utamanya adalah:
+
+```text
+router -> service -> repository / integration
+chat -> conversations / tools / llm
+tools -> integrations
+jobs -> repository / llm
+```
+
+`core` tidak bergantung pada fitur. LLM adapter dan integration juga tidak
+mengetahui detail HTTP, sehingga orchestration dapat diuji tanpa menjalankan server.
+
 ## Checks
 
 Requires the local Postgres up (`tests/conftest.py`'s `db_session` fixture
 runs against it, wrapped in a rolled-back transaction per test) — this
-wasn't needed before the background worker's tests were added.
+wasn't needed before the background jobs tests were added.
 
 ```bash
 .venv/bin/pytest

@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.content import extract_final_text
+from app.ai.chat.content import extract_final_text
 from app.conversations.models import Conversation, Message
 from app.conversations.repository import ConversationRepository
 from app.conversations.schemas import (
@@ -47,6 +47,7 @@ def conversation_to_output(conversation: Conversation) -> ConversationOut:
     )
 
 
+# Service menjalankan aturan bisnis dan mengoordinasikan repository.
 class ConversationService:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -59,8 +60,6 @@ class ConversationService:
         before: str | None = None,
     ) -> ConversationsListResponse:
         parsed_user_id = parse_uuid(user_id, "Invalid user_id")
-        # limit omitted entirely -> existing unpaginated behavior, unchanged
-        # for any caller that hasn't adopted cursor pagination yet.
         if limit is None:
             conversations = await self.repository.list_for_user(parsed_user_id)
             return ConversationsListResponse(

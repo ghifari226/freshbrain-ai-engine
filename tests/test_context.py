@@ -1,4 +1,4 @@
-from app.chat.context import build_chat_context
+from app.ai.chat.context import build_chat_context
 from app.conversations.models import Message
 
 

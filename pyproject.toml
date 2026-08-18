@@ -48,3 +48,6 @@ select = ["E", "F", "I", "UP"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.resources.tools" = ["*.json"]

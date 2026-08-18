@@ -11,10 +11,6 @@ router = APIRouter(prefix="/dev", tags=["dev"])
 @router.post("/token", response_model=DevTokenResponse)
 @limiter.limit(lambda: get_settings().dev_token_rate_limit)
 async def mint_token(request: Request, body: DevTokenRequest) -> DevTokenResponse:
-    """Stands in for chat-gateway signing a real token — deliberately
-    unauthenticated (there's nothing to authenticate against yet). Delete
-    this endpoint once chat-gateway is in the live path (v0.5.0 Beta, see
-    freshbrain-agreement/VERSIONING.md) and mints tokens instead."""
     settings = get_settings()
     token = encode_token(body.user_id, body.role, body.allowed_scopes)
     return DevTokenResponse(access_token=token, expires_in=settings.jwt_expires_minutes * 60)

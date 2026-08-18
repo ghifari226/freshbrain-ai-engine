@@ -19,5 +19,4 @@ async def feedback(
     session: Session,
     claims: Claims,
 ) -> FeedbackResponse:
-    # Token claims are authoritative — see chat/router.py's chat() for why.
     return await FeedbackService(session).add(request, claims.user_id, claims.role)

@@ -1,16 +1,16 @@
 import httpx
 import pytest
 
-from app.chat.tools import (
+from app.ai.tools.catalog import (
     ALL_TOOLS,
     TOOL_CATALOG_METADATA,
     TOOL_SCOPES,
     _validate_catalog_consistency,
     catalog_for_scopes,
-    execute_tool,
     scope_grants,
     tools_for_scopes,
 )
+from app.ai.tools.executor import execute_tool
 from app.core.security import encode_token
 from app.main import app
 
@@ -98,9 +98,9 @@ async def test_tools_endpoint_requires_token() -> None:
     assert response.status_code == 401
 
 
-def test_real_registry_is_internally_consistent() -> None:
-    # Proves the module-load-time call in tools.py didn't just get lucky —
-    # re-running it here against the real registry must also pass clean.
+def test_real_catalog_is_internally_consistent() -> None:
+    # Proves the module-load-time call in catalog.py didn't just get lucky —
+    # re-running it here against the real catalog must also pass clean.
     _validate_catalog_consistency(ALL_TOOLS, TOOL_SCOPES, TOOL_CATALOG_METADATA)
 
 

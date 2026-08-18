@@ -6,12 +6,11 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.conversations import models as conversation_models  # noqa: F401
 from app.core.config import get_settings
-from app.core.database import sqlalchemy_url
-from app.db.base import Base
+from app.core.database import Base, sqlalchemy_url
 from app.feedback import models as feedback_models  # noqa: F401
-from app.observability import models as observability_models  # noqa: F401
+from app.jobs import models as job_models  # noqa: F401
+from app.tool_call_logs import models as tool_call_models  # noqa: F401
 from app.tool_requests import models as tool_requests_models  # noqa: F401
-from app.worker import models as worker_models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", sqlalchemy_url(get_settings().database_url))

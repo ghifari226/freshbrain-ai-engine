@@ -14,6 +14,7 @@ from app.conversations.service import ConversationService
 from app.core.database import get_session
 from app.core.security import TokenClaims, get_current_claims
 
+# Router menerjemahkan HTTP menjadi pemanggilan service dan response API.
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 Session = Annotated[AsyncSession, Depends(get_session)]
 Claims = Annotated[TokenClaims, Depends(get_current_claims)]
@@ -26,8 +27,6 @@ async def list_conversations(
     limit: Annotated[int | None, Query(gt=0, le=200)] = None,
     before: Annotated[str | None, Query()] = None,
 ) -> ConversationsListResponse:
-    # limit omitted entirely -> identical to today's unpaginated response,
-    # see ConversationService.list()'s comment.
     return await ConversationService(session).list(claims.user_id, limit=limit, before=before)
 
 
@@ -51,7 +50,6 @@ async def rename_conversation(
     session: Session,
     claims: Claims,
 ) -> RenameConversationResponse:
-    # Token claims are authoritative — see chat/router.py's chat() for why.
     await ConversationService(session).rename(conversation_id, claims.user_id, request.title)
     return RenameConversationResponse(
         conversation_id=conversation_id,

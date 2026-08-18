@@ -3,9 +3,6 @@ from typing import Any
 
 import structlog
 
-# Defense-in-depth only — nothing currently logs these deliberately, this
-# just stops an accidental future `logger.info(..., token=...)` call site
-# from leaking a raw secret into JSON logs.
 _SECRET_KEY_MARKERS = (
     "password",
     "token",
@@ -48,10 +45,6 @@ def configure_logging() -> None:
         cache_logger_on_first_use=True,
     )
 
-    # Installed on the root logger's handler, so existing bare
-    # logging.getLogger(__name__).warning(...) call sites (e.g.
-    # app/chat/orchestration.py, app/integrations/wms.py) automatically get
-    # JSON rendering + contextvars merged in without any code changes there.
     formatter = structlog.stdlib.ProcessorFormatter(
         foreign_pre_chain=shared_processors,
         processors=[

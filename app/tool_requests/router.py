@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.tools import scope_grants
+from app.ai.tools.catalog import scope_grants
 from app.conversations.service import parse_uuid
 from app.core.database import get_session
 from app.core.security import TokenClaims, get_current_claims
@@ -63,7 +63,5 @@ async def update_tool_request_status(
     session: Session,
     claims: Claims,
 ) -> ToolRequestOut:
-    # The only status-changing endpoint — a plain setter (draft/posted/live),
-    # no promote/fulfill ceremony. See ToolRequestService.set_status().
     _require_scope(claims, "tools.request_status")
     return await ToolRequestService(session).set_status(parse_uuid(request_id), body.status)

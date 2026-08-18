@@ -3,9 +3,9 @@ from typing import Any
 
 from structlog.testing import capture_logs
 
-from app.chat import orchestration
-from app.chat.orchestration import ChatStatus, run_chat_loop
-from app.chat.stub import StubMessage
+from app.ai.chat import orchestration
+from app.ai.chat.orchestration import ChatStatus, run_chat_loop
+from app.ai.llm.anthropic.stub import StubMessage
 
 
 class FakeClient:

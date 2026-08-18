@@ -6,8 +6,8 @@ import pytest
 from fastapi import HTTPException
 from structlog.testing import capture_logs
 
-from app.chat.schemas import ChatRequest
-from app.chat.service import ChatService
+from app.ai.chat.schemas import ChatRequest
+from app.ai.chat.service import ChatService
 
 
 def _parse(chunk: str) -> tuple[str, dict]:

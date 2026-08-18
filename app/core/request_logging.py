@@ -10,6 +10,7 @@ from starlette.types import ASGIApp
 logger = structlog.get_logger()
 
 
+# Middleware membungkus setiap request untuk mencatat konteks lintas endpoint.
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)

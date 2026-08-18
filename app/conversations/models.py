@@ -1,18 +1,20 @@
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base
-from app.db.types import ClaudeContent
+from app.core.database import Base
+
+ClaudeContent = str | list[dict[str, Any]]
 
 if TYPE_CHECKING:
     from app.feedback.models import Feedback
 
 
+# Model ORM menjelaskan bentuk tabel dan relasi yang disimpan oleh database.
 class Conversation(Base):
     __tablename__ = "conversations"
     __table_args__ = (Index("idx_conversations_user_id", "user_id", text("last_active_at DESC")),)

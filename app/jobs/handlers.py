@@ -5,6 +5,8 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.llm.anthropic.client import AnthropicClient
+from app.ai.prompts.builder import build_datetime_block, build_system_prompt
+from app.ai.prompts.summary import SUMMARY_PROMPT
 from app.conversations.repository import ConversationRepository
 from app.core.config import get_settings
 
@@ -24,9 +26,11 @@ async def summarize_conversation(payload: dict[str, Any], session: AsyncSession)
         return
 
     client = AnthropicClient()
+    system = [*build_system_prompt(SUMMARY_PROMPT), build_datetime_block()]
     new_summary = await client.summarize(
         conversation.rolling_summary,
         [str(m.content) for m in to_fold],
+        system,
     )
     conversation.rolling_summary = new_summary
     conversation.summarized_through_count = already + len(to_fold)

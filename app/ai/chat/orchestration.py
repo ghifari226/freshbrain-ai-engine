@@ -1,14 +1,15 @@
 import json
 import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime
 from enum import StrEnum
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import structlog
 
 from app.ai.llm.anthropic.client import AnthropicClient
+from app.ai.prompts.builder import build_datetime_block, build_system_prompt
+from app.ai.prompts.chat import CHAT_PROMPT
+from app.ai.prompts.title import TITLE_PROMPT
 from app.ai.tools.catalog import RENAME_TOOL, tools_for_scopes
 from app.ai.tools.executor import execute_tool
 
@@ -26,35 +27,6 @@ class ChatStatus(StrEnum):
 
 StatusCallback = Callable[[ChatStatus], Awaitable[None]]
 ToolCallCallback = Callable[[str, dict[str, Any], str, float], Awaitable[None]]
-TITLE_SYSTEM_PROMPT = (
-    "Summarize the user's message into a short conversation title (at most "
-    "6 words, no surrounding quotes or trailing punctuation). Respond with "
-    "only the title."
-)
-
-
-def build_system_prompt() -> str:
-    now = datetime.now(ZoneInfo("Asia/Jakarta"))
-    return (
-        "You are FreshBrain, an internal AI assistant for Fresh Factory "
-        "(cold chain, warehouse, and logistics operations).\n\n"
-        f"Current datetime: {now:%Y-%m-%d %H:%M:%S} WIB (Asia/Jakarta).\n\n"
-        "Use the available tools to answer operational questions accurately. "
-        "If a question requires data you don't have a tool for, say so rather "
-        "than guessing.\n\n"
-        "Tool results carry a `status` field: SUCCESS, NO_DATA, or "
-        "UPSTREAM_ERROR. On NO_DATA, the query was valid and authorized but "
-        "genuinely found nothing — tell the user no matching data was found; "
-        "don't guess a reason, and don't treat it the same as a SUCCESS "
-        "result with a zero/empty value unless that's literally what the "
-        "tool's data says. On UPSTREAM_ERROR, the data could not be "
-        "retrieved — tell the user it couldn't be retrieved right now; "
-        "don't present it as a real answer or invent an explanation for "
-        "why.\n\n"
-        "If the user pastes a password, API key, token, or other credential "
-        "into the conversation, don't repeat it back verbatim — warn them "
-        "that it may have been exposed and suggest they rotate it."
-    )
 
 
 async def run_chat_loop(
@@ -77,11 +49,13 @@ async def run_chat_loop(
     tools = tools_for_scopes(allowed_scopes)
     if allow_rename:
         tools.append(RENAME_TOOL)
+    # Dibangun sekali di luar loop — datetime-nya tidak perlu segar per iterasi tool-use.
+    system = [*build_system_prompt(CHAT_PROMPT), build_datetime_block()]
 
     for iteration in range(MAX_TOOL_ITERATIONS):
         await emit(ChatStatus.UNDERSTANDING if iteration == 0 else ChatStatus.ANALYZING)
         response = await model_client.create_message(
-            system=build_system_prompt(),
+            system=system,
             tools=tools,
             messages=working_messages,
             max_tokens=MAX_TOKENS,
@@ -131,4 +105,5 @@ async def run_chat_loop(
 
 
 async def generate_title(message: str) -> str:
-    return await AnthropicClient().generate_title(message, TITLE_SYSTEM_PROMPT)
+    system = [*build_system_prompt(TITLE_PROMPT), build_datetime_block()]
+    return await AnthropicClient().generate_title(message, system)
